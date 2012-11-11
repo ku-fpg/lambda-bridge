@@ -37,8 +37,21 @@ data Bridge msg = Bridge
 					--   reading does not depend on any external interaction or events.
 	}
 
---------------------------------------------------------------------------
+{--------------------------------------------------------------------------
 
+Layer                   Datatype        Example of Protocol
+
+
+Application Layer       -               Custom Bus Protocol
+Transport Layer         Datagram        UDP                     (Datagram of bytes, checked by CRC)
+Link Layer              Frame           SLIP                    (Frame of bytes, can be garbled)
+Phyisical Layer         Bytes           RS232                   (byte-wide transmission, can be unreliable)
+
+
+--------------------------------------------------------------------------}
+
+
+--------------------------------------------------------------------------
 -- | A 'Bridge (of) Byte' is for talking one byte at a time, where the
 -- byte may or may not get there, and may get garbled.
 --
@@ -90,6 +103,34 @@ fromFrame (Frame fs) = decode (LBS.fromChunks [fs])
 -- | A way of turning something into a Frame, using the 'Binary' class.
 toFrame :: (Binary a) => a -> Frame
 toFrame a = Frame $ BS.concat $ LBS.toChunks $ encode a
+
+
+--------------------------------------------------------------------------
+-- | A 'Bridge (of) Datagram' is small set of bytes, where a Datagram may
+-- or may not get to the destination, but if received, will
+-- not be garbled or fragmented (via CRC or equiv).
+-- There is typically an implementation specific maximum size of a Datagram.
+
+-- An example of a 'Bridge (of) Datagram' is UDP.
+
+newtype Datagram = Datagram BS.ByteString
+
+instance Show Datagram where
+   show (Datagram wds) = "Datagram " ++ show [ Byte w | w <- BS.unpack wds ]
+
+instance Binary Datagram where
+        put (Datagram bs) = put bs
+        get = liftM Datagram get
+
+-- | A way of turning a Frame into its contents, using the 'Binary' class.
+-- This may throw an async exception.
+fromDatagram :: (Binary a) => Datagram -> a
+fromDatagram (Datagram fs) = decode (LBS.fromChunks [fs])
+
+-- | A way of turning something into a Frame, using the 'Binary' class.
+toDatagram :: (Binary a) => a -> Datagram
+toDatagram a = Datagram $ BS.concat $ LBS.toChunks $ encode a
+
 
 --------------------------------------------------------------------------
 
