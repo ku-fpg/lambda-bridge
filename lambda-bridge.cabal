@@ -18,9 +18,23 @@ Flag example
   Description: build the single example
 
 Library
-  Build-Depends:   base >= 4 && < 5, network >= 2.3, binary, bytestring >= 0.9.1.10, random, time, data-default, containers, stm, directory, crc16, hslogger, unix >= 2.4
+  Build-Depends:   base >= 4 && < 5, 
+                   network >= 2.3, 
+                   binary, 
+                   bytestring >= 0.9.1.10, 
+                   random, 
+                   time, 
+                   data-default, 
+                   containers, 
+                   stm, 
+                   directory, 
+                   crc16, 
+                   hslogger, 
+                   unix >= 2.4,
+                   mtl >= 2.1.2
   Exposed-Modules:     Network.LambdaBridge
                        Network.LambdaBridge.Bridge
+                       Network.LambdaBridge.Bus
                        Network.LambdaBridge.Frame
                        Network.LambdaBridge.Socket
                        Network.LambdaBridge.Timeout
