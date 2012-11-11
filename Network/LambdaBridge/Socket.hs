@@ -45,6 +45,6 @@ socketBytesBridge hostName sockName = do
 -- open a bridge of *frames* to the given socket name. This depends on the
 -- remote service being configured for frames (for example, SOCK_DGRAM).
 
-udpFrameBridge :: SocketName -> IO (Bridge Frame)
+udpFrameBridge :: HostName -> Int -> IO (Bridge Frame)
 udpFrameBridge = error "udpFrameBridge: unsupported (yet)"
 
