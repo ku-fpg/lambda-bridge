@@ -38,6 +38,7 @@ Library
                        Network.LambdaBridge.Bus
                        Network.LambdaBridge.Frame
                        Network.LambdaBridge.Socket
+                       Network.LambdaBridge.SLIP
                        Network.LambdaBridge.Timeout
 
   Other-modules:
