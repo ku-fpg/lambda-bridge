@@ -49,30 +49,8 @@ data BusCmd :: * -> * where
         BusWrite :: Word16 -> Word8     -> BusCmd ()
         BusRead  :: Word16              -> BusCmd (Remote Word8)
 
-        Pure     :: a                   -> BusCmd a
-        Bind     :: BusCmd a
-                 -> (a -> BusCmd b)     -> BusCmd b
-
 
 type BusM a = Program BusCmd a
-
-instance Applicative BusCmd where
-        pure = Pure
-        b1 <*> b2 = do
-                f <- b1
-                a <- b2
-                return (f a)
-
-instance Monad BusCmd where
-        return = Pure
-        (>>=) = Bind
-
-instance Monoid (BusCmd ()) where
-        mempty = pure ()
-        mappend b1 b2 = b1 *> b2
-
-instance Functor BusCmd where
-        fmap f a = pure f <*> a
 
 done :: BusM (Remote ())
 done = return (pure ())
@@ -96,13 +74,6 @@ send (Board fn) cmds = do
                         Nothing     -> return Nothing
 
 
-walk :: Monad m => (forall a . BusCmd a -> m a) -> BusCmd a -> m a
-walk _ (Pure a) = return a
-walk fn (Bind m k) = do
-        a <- walk fn m
-        walk fn (k a)
-walk fn other = fn other
-
 cmdToRequest :: BusM a -> Writer [Word8] a
 cmdToRequest = interp $ \ cmd -> case cmd of
         BusWrite addr val -> do
@@ -120,18 +91,21 @@ interp f = eval . view
                 r <- f m
                 interp f (i r)
 
+reifyBusCmd :: [Word8] -> BusM (Remote [Word8])
+reifyBusCmd (tag:h1:l1:val:rest) | tag == tagWrite = do
+        busWrite addr val
+        reifyBusCmd rest
+  where
+          addr = unseq16 [h1,l1]
+reifyBusCmd (tag:h1:l1:rest) | tag == tagRead = do
+        val <- busRead addr
+        rest <- reifyBusCmd rest
+        return (liftA2 (:) val rest)
+  where
+          addr = unseq16 [h1,l1]
+reifyBusCmd [] = return (pure [])
+reifyBusCmd _ = fail "bad bytes for reifyBus"
 {-
-reifyBusCmd :: [Word8] -> BusCmd (Remote [Word8])
-reifyBusCmd (tag:h1:l1:val:rest) | tag == tagWrite =
-        BusWrite addr val *> reifyBusCmd rest
-  where
-          addr = unseq16 [h1,l1]
-reifyBusCmd (tag:h1:l1:rest) | tag == tagRead =
-        liftA2 (:) (BusRead addr) (reifyBusCmd rest)
-  where
-          addr = unseq16 [h1,l1]
-reifyBusCmd [] = pure []
-
 prop_reqReify cmd = xs == cmdToRequest (reifyBusCmd xs)
   where xs = cmdToRequest cmd
 -}
@@ -166,7 +140,7 @@ unseq16 :: [Word8] -> Word16
 unseq16 [h,l] = fromIntegral h * 256 + fromIntegral l
 
 busWrite addr val = singleton $ BusWrite addr val
-busRead addr = singleton $ BusRead addr
+busRead addr      = singleton $ BusRead addr
 
 test = do
         send brd $ do
@@ -261,8 +235,8 @@ showBusFrame :: BusFrame -> Frame
 showBusFrame (BusFrame uq msg) = Frame (BS.append (BS.pack (seq16 uq)) (BS.pack msg))
 
 
-
-interpBus :: (BusCmd [Word8] -> IO (Maybe [Word8])) -> IO (Bridge Frame)
+-- not sure about remote here
+interpBus :: (BusM (Remote [Word8]) -> IO (Maybe [Word8])) -> IO (Bridge Frame)
 interpBus cmd = do
         cmdChan <- newChan
         resChan <- newChan
@@ -270,9 +244,101 @@ interpBus cmd = do
         --
         forkIO $ forever $ do
                 frame <- readChan cmdChan
-
-                return ()
+                case readBusFrame frame of
+                  Nothing -> return ()
+                  Just (BusFrame uq ws) -> do
+                        ret <- cmd $ reifyBusCmd ws
+                        case ret of
+                          Nothing -> return ()
+                          Just ws' -> writeChan resChan (showBusFrame $ BusFrame uq ws')
+                        return ()
 
         return $ Bridge { toBridge = writeChan cmdChan
                         , fromBridge = readChan resChan
                         }
+
+
+--memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
+
+data WriterState = WriterStart | WriterPushed Word8 | WriterTagged Word8 Word8
+        deriving (Eq,Show)
+
+writer :: (Word8 -> Word8 -> IO Word8) -> IO (BusM (Remote [Word8]) -> IO (Maybe [Word8]))
+writer push = do
+        state <- newMVar WriterStart
+        let getState m = do
+                r <- takeMVar state
+                m r
+        let newState n = do
+                putMVar state n
+
+        let fCmd :: WriterState -> BusCmd a -> IO a
+            fCmd WriterStart            (BusWrite addr val)     | addr == 0 = do
+                   putMVar state $ WriterPushed val
+                   return ()
+            fCmd (WriterPushed s1)      (BusWrite addr val)     | addr == 1 = do
+                   putMVar state $ WriterTagged s1 val
+                   return ()
+            fCmd (WriterTagged s1 tag)  (BusRead addr)          | addr == 2 = do
+                   ret <- push s1 tag
+                   putMVar state $ WriterStart
+                   return (pure ret)
+
+            fCmd _ (BusWrite {})      = do
+                   putMVar state $ WriterStart
+                   return ()
+
+            fCmd _ (BusRead addr)      = do
+                   putMVar state $ WriterStart
+                   return Symbol        -- should never happen
+
+        return $ \ m -> do
+                r <- interp (\ cmd -> do st <- takeMVar state
+                                         fCmd st cmd) m
+                return Nothing
+{-
+                (\ cmd -> case cmd of
+                        BusWrite addr val  | addr == 0 -> getState $ \ st -> case st of
+                                WriterStart -> newState (WriterPushed val)
+                                _           -> newState WriterStart
+-}
+{-
+                        BusWrite addr tag  | addr == 1 -> getState $ \ st -> case st of
+                                WriterPushed val -> newState (WriterTagged val tag)
+                                _           -> newState WriterStart
+-}
+{-
+                        BusRead addr       | addr == 2 -> do
+                           getState $ \ st -> case st of
+                                WriterTagged val tag -> do
+                                        b <- push val
+                                        if b then
+                                _           -> newState WriterStart
+                           return Symbol
+-}
+--                           ) m
+
+
+-- NOTE: in the bytecode interpreter, we need to check the tag for legacy, and
+-- do not execute out of order blocks, only new ones.
+
+--reader :: IO Word8              -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
+
+
+{-
+interp :: BusM a -> IO a
+interp f = eval . view
+  where eval :: forall a . ProgramView c a -> m a
+        eval (Return a) = return a
+        eval (m :>>= i) = do
+                r <- f m
+-}
+
+
+--test2 = do
+--        frameBridge <- interpBus $ interp $ \ cmd -> case cmd of
+--                BusWrite addr val -> return ()
+--                BusRead addr      -> return ()
+--        return ()
+
+
