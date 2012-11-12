@@ -49,7 +49,6 @@ data BusCmd :: * -> * where
         BusWrite :: Word16 -> Word8     -> BusCmd ()
         BusRead  :: Word16              -> BusCmd (Remote Word8)
 
-
 type BusM a = Program BusCmd a
 
 done :: BusM (Remote ())
@@ -144,8 +143,8 @@ brd = Board $ error ""
 -- | connectBoard takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
 -- an abstact handle to the physical board.
-connectBoard :: Float -> Bridge Framed Checked -> IO Board
-connectBoard timeoutTime bridge = do
+connectToBoard :: Float -> Bridge Framed Checked -> IO Board
+connectToBoard timeoutTime bridge = do
 
         uniq :: MVar Word16 <- newEmptyMVar
         forkIO $ let loop n = do
@@ -228,7 +227,7 @@ showBusFrame :: BusFrame -> BS.ByteString
 showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
 -- not sure about remote here
-interpBus :: (BusM (Remote [Word8]) -> IO (Maybe [Word8])) -> IO (Bridge Framed Reliable)
+interpBus :: (forall a . BusM (Remote a) -> IO (Maybe a)) -> IO (Bridge Framed Checked)
 interpBus cmd = do
         cmdChan <- newChan
         resChan <- newChan
