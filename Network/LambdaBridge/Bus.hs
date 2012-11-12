@@ -26,6 +26,9 @@ newtype Board = Board
   { send :: forall a . BusM (Remote a) -> IO (Maybe a)      -- ^ run a transaction on the 'Board', please.
   }
 
+send_ :: Board -> BusM a -> IO (Maybe ())
+send_ brd m = send brd (m >> return (pure ()))
+
 data Remote a
         = Symbol
         | Remote a
@@ -49,6 +52,9 @@ type BusM a = Program BusCmd a
 done :: BusM (Remote ())
 done = return (pure ())
 
+busWrite addr val = singleton $ BusWrite addr val
+busRead addr      = singleton $ BusRead addr
+
 cmdToRequest :: BusM a -> Writer [Word8] a
 cmdToRequest = interp $ \ cmd -> case cmd of
         BusWrite addr val -> do
@@ -65,6 +71,9 @@ interp f = eval . view
         eval (m :>>= i) = do
                 r <- f m
                 interp f (i r)
+
+-- reifyBusCmd recreates a monadic program from its Byte sequence
+-- which performs the actions of concatinating the results of the reads.
 
 reifyBusCmd :: [Word8] -> BusM (Remote [Word8])
 reifyBusCmd (tag:h1:l1:val:rest) | tag == tagWrite = do
@@ -114,27 +123,12 @@ seq16 v = [hi v,low v]
 unseq16 :: [Word8] -> Word16
 unseq16 [h,l] = fromIntegral h * 256 + fromIntegral l
 
-busWrite addr val = singleton $ BusWrite addr val
-busRead addr      = singleton $ BusRead addr
-
-test = do
-        send brd $ do
-                busWrite 0 1
-                busWrite 2 3
-                busRead 5
-                busWrite 9 10
-                done
-
-brd = Board $ error ""
-
---boardFromBridgeFrame :: Bridge Frame -> IO Board
-
 ----------------------------------------------------------------
 
 -- | connectBoard takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
 -- an abstact handle to the physical board.
-connectToBoard :: Float -> Bridge Framed Checked UnReliable -> IO Board
+connectToBoard :: Float -> Bridge Framed Checked -> IO Board
 connectToBoard timeoutTime bridge = do
 
         uniq :: MVar Word16 <- newEmptyMVar
@@ -218,7 +212,7 @@ showBusFrame :: BusFrame -> BS.ByteString
 showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
 -- not sure about remote here
-interpBus :: (forall a . BusM (Remote a) -> IO (Maybe a)) -> IO (Bridge Framed Checked UnReliable)
+interpBus :: (forall a . BusM (Remote a) -> IO (Maybe a)) -> IO (Bridge Framed Checked)
 interpBus cmd = do
         cmdChan <- newChan
         resChan <- newChan
@@ -237,6 +231,11 @@ interpBus cmd = do
         return $ Bridge { toBridge = writeChan cmdChan
                         , fromBridge = readChan resChan
                         }
+
+
+
+rpc :: ([Word8] -> IO [Word8]) -> IO (BusM (Remote a) -> IO (Maybe a))
+rpc f = undefined
 
 {-
 

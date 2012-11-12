@@ -20,29 +20,36 @@ debug = debugM "lambda-bridge.bridge"
 data Fragmentation     = Framed                 -- ^ sequence of bytes that stay together
                        | Streamed               -- ^ can arived in fragements, or joined
 
-data Integrity         = Checked                -- ^ CRC'd
-                       | UnChecked              -- ^ raw bytes
+data Integrity         = Trustworthy
+                       | Checked                -- ^ CRC'd
+                       | Unchecked              -- ^ raw bytes
 
 data Delivery          = Reliable               -- ^ will alway get there
-                       | UnReliable             -- ^ may not get there
+                       | Unreliable             -- ^ may not get there
 
 -- | A 'Bridge' is a bidirectional connection to a specific remote API.
 -- There are many different types of Bridges in the lambda-bridge API.
 
 data Bridge (fragmentation :: Fragmentation)
             (integrity     :: Integrity)
-            (delivery      :: Delivery)
    = Bridge
         { toBridge 	:: BS.ByteString -> IO ()  -- ^ write to a bridge; may block; called many times.
 	, fromBridge	:: IO BS.ByteString        -- ^ read from a bridge; may block, called many times.
         }
+
+
+{-
+Trustworthy     -- it will get there, can be trusted
+Checked         -- if it gets there, it is good
+Unchecked       -- best effort, may be scrambled, lost, etc.
+-}
 
 {-------------------------------------------------------------------
                 Framed                                  Fragmented
 
                 Checked         UnChecked               Checked         UnChecked
 
-Reliable        TCP             SLIP                    Socket(TCP)     (*1)
+Reliable        TCP             (*3)                    Socket(TCP)     (*1)
 
 UnReliable      UDP             SLIP                    (*2)            RS232
 
@@ -52,20 +59,20 @@ When Fragmented, the concepts of Reliable and Checked collapse into one??
 
 (*1) = every char gets through, some are scrambled.
 (*2) = every char that gets through was sent in that order.
-
+(*3) = every packet get as there, may be scrambled
 
 
 -------------------------------------------------------------------------
 
 Layer           Datatype                        Example of Protocol
 
-Transport       Bridge Framed Checked UnReliable           UDP     (Datagram of bytes, checked by CRC)
-Link            Bridge Framed Unchecked  UnReliable       SLIP    (Frame of bytes, can be garbled)
-Physical        Bridge Fragmented Unchecked UnReliable    RS232   (byte-wise transmission, can be unreliable)
+Transport       Bridge Framed Checked           UDP     (Datagram of bytes, checked by CRC)
+Link            Bridge Framed Unchecked         SLIP    (Frame of bytes, can be garbled)
+Physical        Bridge Fragmented Unchecked     RS232   (byte-wise transmission, can be unreliable)
 
 --------------------------------------------------------------------------}
 
-debugBridge :: String -> Bridge f i r -> IO (Bridge f i r)
+debugBridge :: String -> Bridge f i -> IO (Bridge f i)
 debugBridge name bridge = do
 	sendCounter <- newMVar 0
 	recvCounter <- newMVar 0

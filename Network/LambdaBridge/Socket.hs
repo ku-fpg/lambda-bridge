@@ -32,7 +32,7 @@ type SocketName = String
 -- open a bridge of *bytes* to the given socket name. This depends on the
 -- remote service being configured for bytes. (for example, SOCK_STREAM)
 
-socketBytesBridge :: HostName -> PortID -> IO (Bridge Streamed Checked Reliable)
+socketBytesBridge :: HostName -> PortID -> IO (Bridge Streamed Trustworthy)
 socketBytesBridge hostName sockName = do
         hd <- connectTo hostName sockName
         hSetBuffering hd NoBuffering            -- for now
@@ -47,6 +47,6 @@ socketBytesBridge hostName sockName = do
 -- open a bridge of *Datagrams* to the given socket name. This depends on the
 -- remote service being configured for frames (for example, SOCK_DGRAM).
 
-udpFrameBridge :: HostName -> Int -> IO (Bridge Framed Checked UnReliable)
+udpFrameBridge :: HostName -> Int -> IO (Bridge Framed Checked)
 udpFrameBridge = error "udpFrameBridge: unsupported (yet)"
 

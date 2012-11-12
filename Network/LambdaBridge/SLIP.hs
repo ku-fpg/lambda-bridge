@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DataKinds, TypeFamilies #-}
 --
 -- | Support for providing a Frame-based API on top of an bytestream, using SLIP.
 --    * http://en.wikipedia.org/wiki/Serial_Line_Internet_Protocol
@@ -19,7 +19,15 @@ import Control.Monad
 import Network.LambdaBridge.Logging (debugM)
 import Network.LambdaBridge.Bridge
 
-slipProtocol :: Bridge framing integrity delivery -> IO (Bridge Framed integrity delivery)
+type family SLIP_Integrity (a :: Integrity) :: Integrity
+type instance SLIP_Integrity Trustworthy = Trustworthy
+type instance SLIP_Integrity Checked     = Unchecked
+type instance SLIP_Integrity Unchecked   = Unchecked
+
+slipProtocol :: Bridge framing integrity
+             -> IO (Bridge Framed
+                           (SLIP_Integrity integrity)
+                   )
 slipProtocol bytes_bridge = do
         let debug = debugM "lambda-bridge.slip"
 
@@ -34,9 +42,7 @@ slipProtocol bytes_bridge = do
                         | otherwise = [c]
 
         let sendFrame = \ bs -> do
-                let packet = [end]
-                          ++ concatMap bytestuff (BS.unpack bs)
-                          ++ [end]
+                let packet = [end] ++ concatMap bytestuff (BS.unpack bs) ++ [end]
                 toBridge bytes_bridge $ BS.pack packet
 
 
