@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 module Network.LambdaBridge.Socket (socketBytesBridge) where
 
 import Network
@@ -30,21 +32,21 @@ type SocketName = String
 -- open a bridge of *bytes* to the given socket name. This depends on the
 -- remote service being configured for bytes. (for example, SOCK_STREAM)
 
-socketBytesBridge :: HostName -> PortID -> IO (Bridge Bytes)
+socketBytesBridge :: HostName -> PortID -> IO (Bridge Fragmented Reliable)
 socketBytesBridge hostName sockName = do
         hd <- connectTo hostName sockName
         hSetBuffering hd NoBuffering            -- for now
-        return $ Bridge { toBridge = \ (Bytes bs) -> do
+        return $ Bridge { toBridge = \ bs -> do
                                 BS.hPut hd bs
                         , fromBridge = do
                                 bs <- BS.hGet hd 1
                                 if BS.length bs == 0 then fail "socket closed"
-                                                     else return $ Bytes bs
+                                                     else return $ bs
                         }
 
--- open a bridge of *frames* to the given socket name. This depends on the
+-- open a bridge of *Datagrams* to the given socket name. This depends on the
 -- remote service being configured for frames (for example, SOCK_DGRAM).
 
-udpFrameBridge :: HostName -> Int -> IO (Bridge Frame)
+udpFrameBridge :: HostName -> Int -> IO (Bridge Framed Checked)
 udpFrameBridge = error "udpFrameBridge: unsupported (yet)"
 

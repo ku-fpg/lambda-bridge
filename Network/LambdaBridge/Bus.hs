@@ -1,4 +1,4 @@
-{-# LANGUAGE KindSignatures, GADTs, FlexibleInstances, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE KindSignatures, GADTs, FlexibleInstances, RankNTypes, ScopedTypeVariables, DataKinds #-}
 module Network.LambdaBridge.Bus where
 
 import Network.LambdaBridge.Bridge
@@ -55,24 +55,9 @@ type BusM a = Program BusCmd a
 done :: BusM (Remote ())
 done = return (pure ())
 
-newtype Board = Board (Frame -> IO (Maybe Frame))       -- Will time out in a Board-specific way
---                      ((Frame -> IO ()) -> IO ())       -- request callback on interupt
-
--- send, waits for response, can time out
-send :: Board -> BusM (Remote a) -> IO (Maybe a)
-send (Board fn) cmds = do
-        let (_,req_msg) = runWriter (cmdToRequest cmds)
-        print req_msg
-        rep_msg <- fn (Frame (BS.pack req_msg))
-        print rep_msg
-        case rep_msg of
-          Nothing -> return Nothing
-          Just (Frame rep) ->
-                    case runStateT (cmdWithReply cmds) (BS.unpack rep) of
-                        Just (Remote a,[]) -> return (Just a)
-                        Just (a,_)  -> return Nothing -- fail "bad format, bad remote, etc"
-                        Nothing     -> return Nothing
-
+newtype Board = Board
+  { send :: forall a . BusM (Remote a) -> IO (Maybe a)      -- Will time out in a Board-specific way
+  }
 
 cmdToRequest :: BusM a -> Writer [Word8] a
 cmdToRequest = interp $ \ cmd -> case cmd of
@@ -151,6 +136,7 @@ test = do
                 done
 
 brd = Board $ error ""
+
 --boardFromBridgeFrame :: Bridge Frame -> IO Board
 
 ----------------------------------------------------------------
@@ -158,7 +144,7 @@ brd = Board $ error ""
 -- | connectBoard takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
 -- an abstact handle to the physical board.
-connectBoard :: Float -> Bridge Frame -> IO Board
+connectBoard :: Float -> Bridge Framed Checked -> IO Board
 connectBoard timeoutTime bridge = do
 
         uniq :: MVar Word16 <- newEmptyMVar
@@ -167,22 +153,22 @@ connectBoard timeoutTime bridge = do
                         loop (succ n)
                  in loop 0
 
-        callbacks :: Callback Word16 (Maybe Frame) <- liftM Callback $ newMVar Map.empty
+        callbacks :: Callback Word16 (Maybe [Word8]) <- liftM Callback $ newMVar Map.empty
 
         forkIO $ forever $ do
-                Frame bs0 <- fromBridge bridge
-                case do (a,bs1) <- BS.uncons bs0
-                        (b,bs2) <- BS.uncons bs1
-                        return (unseq16 [a,b],bs2) of
-                  Just (uq,rest)
-                           -- good packet, try respond
-                        | BS.length rest > 0 -> callback callbacks uq (Just (Frame rest))
-                  Nothing -> return () -- faulty packet?
+                bs0 <- fromBridge bridge
+                case readBusFrame bs0 of
+                  Just (BusFrame uq rest) -> callback callbacks uq (Just rest)
+                  Nothing                 -> return () -- faulty packet?
 
-        let send (Frame msg) = do
+        return $ Board
+          { send = \ cmd -> do
+                let (_,req_msg) = runWriter (cmdToRequest cmd)
+                print req_msg
+
                 uq <- takeMVar uniq
 
-                rep :: MVar (Maybe Frame) <- newEmptyMVar
+                rep :: MVar (Maybe [Word8]) <- newEmptyMVar
 
                 -- register the callback
                 register callbacks uq $ putMVar rep
@@ -191,13 +177,18 @@ connectBoard timeoutTime bridge = do
                         threadDelay (round (timeoutTime * 1000 * 1000))
                         callback callbacks uq Nothing
 
-                toBridge bridge (Frame (BS.append (BS.pack (seq16 uq)) msg))
+                toBridge bridge $ showBusFrame $ BusFrame uq req_msg
 
                 -- And wait for the callback
-                takeMVar rep
+                rep_msg <- takeMVar rep
 
-
-        return $ Board send
+                case rep_msg of
+                  Nothing -> return Nothing
+                  Just rep_bs -> case runStateT (cmdWithReply cmd) rep_bs of
+                                    Just (Remote a,[]) -> return (Just a)
+                                    Just (a,_)  -> return Nothing -- fail "bad format, bad remote, etc"
+                                    Nothing     -> return Nothing
+          }
 
 -----------------------------------------------------------------------------
 
@@ -223,25 +214,25 @@ callback (Callback callbacks) key val = do
 data BusFrame = BusFrame Word16 [Word8]
         deriving (Show)
 
-readBusFrame :: Frame -> Maybe BusFrame
-readBusFrame (Frame bs0) =
+-- TODO: Make these use [Word8], not ByteString
+-- Add a BusReply [Word8] as well
+readBusFrame :: BS.ByteString -> Maybe BusFrame
+readBusFrame bs0 =
         case do (a,bs1) <- BS.uncons bs0
                 (b,bs2) <- BS.uncons bs1
                 return (unseq16 [a,b],bs2) of
           Just (uq,rest) -> return (BusFrame uq (BS.unpack rest))
           Nothing -> fail "bad packet format"
 
-showBusFrame :: BusFrame -> Frame
-showBusFrame (BusFrame uq msg) = Frame (BS.append (BS.pack (seq16 uq)) (BS.pack msg))
-
+showBusFrame :: BusFrame -> BS.ByteString
+showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
 -- not sure about remote here
-interpBus :: (BusM (Remote [Word8]) -> IO (Maybe [Word8])) -> IO (Bridge Frame)
+interpBus :: (BusM (Remote [Word8]) -> IO (Maybe [Word8])) -> IO (Bridge Framed Reliable)
 interpBus cmd = do
         cmdChan <- newChan
         resChan <- newChan
 
-        --
         forkIO $ forever $ do
                 frame <- readChan cmdChan
                 case readBusFrame frame of
@@ -257,6 +248,7 @@ interpBus cmd = do
                         , fromBridge = readChan resChan
                         }
 
+{-
 
 --memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
 
@@ -340,5 +332,5 @@ interp f = eval . view
 --                BusWrite addr val -> return ()
 --                BusRead addr      -> return ()
 --        return ()
-
+-}
 

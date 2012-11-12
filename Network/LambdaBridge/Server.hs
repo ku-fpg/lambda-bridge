@@ -25,9 +25,15 @@ import Network
 --import Network.Socket hiding (send, sendTo, recv, recvFrom)
 --import Network.Socket.ByteString
 
-debug = debugM "lambda-bridge.socket"
+debug = debugM "lambda-bridge.server"
 
-serverBytesBridge :: PortID -> Bridge Bytes -> IO ()
+-- | We intentually allow any style of bridge here, because
+-- sometimes we use the server for testing network stacks.
+--
+-- In typical useage, Lambda Bridge does not use (software) servers
+-- except for testing, or perhaps forwarding to real hardware.
+--
+serverBytesBridge :: PortID -> Bridge framing integrity -> IO ()
 serverBytesBridge portId bridge =
         finally (do sock <- listenOn portId
                     forever $ do
@@ -44,14 +50,9 @@ serverBytesBridge portId bridge =
         forkIO $ forever $ do
                 bs <- BS.hGet hd 1
                 if BS.length bs == 0 then fail "socket closed"
-                                     else toBridge bridge $ Bytes bs
+                                     else toBridge bridge bs
 
         forever $ do
-                Bytes bs <- fromBridge bridge
+                bs <- fromBridge bridge
                 BS.hPut hd bs
 
-
-bridge :: Bridge Bytes
-bridge = Bridge { toBridge = \ (Bytes bs) -> print bs, fromBridge = forever yield }
-
--- udpFrameBridge :: Int -> Bridge Frame -> IO ()

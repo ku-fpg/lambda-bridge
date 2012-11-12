@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE RankNTypes, ScopedTypeVariables, GADTs, DataKinds, KindSignatures #-}
 
 module Network.LambdaBridge.Bridge where
 
@@ -27,7 +27,7 @@ import System.IO.Unsafe (unsafeInterleaveIO)
 
 -- | A 'Bridge' is a bidirectional connection to a specific remote API.
 -- There are many different types of Bridges in the lambda-bridge API.
-
+{-
 data Bridge msg = Bridge
 	{ toBridge 	:: msg -> IO ()	-- ^ write to a bridge; may block; called many times.
 	, fromBridge	:: IO msg	-- ^ read from a bridge; may block, called many times.
@@ -37,6 +37,27 @@ data Bridge msg = Bridge
 					--   reading does not depend on any external interaction or events.
 	}
 
+-}
+data Fragmentation      = Framed | Fragmented
+
+-- Later, add concept of reliableness, which implies checked
+data Integrity         = Reliable               -- CRC'd + will get there
+                       | Checked                -- CRC'd
+                       | UnChecked              -- raw bytes
+
+data Bridge (framention :: Fragmentation)
+             (error     :: Integrity)
+   = Bridge
+        { toBridge 	:: BS.ByteString -> IO ()	-- ^ write to a bridge; may block; called many times.
+	, fromBridge	:: IO BS.ByteString	-- ^ read from a bridge; may block, called many times.
+					--   The expectation is that *eventually* after some
+					--   time and/or computation
+					--   someone will read from the bridge, and the
+					--   reading does not depend on any external interaction or events.
+        }
+
+
+{-
 {--------------------------------------------------------------------------
 
 Layer                   Datatype        Example of Protocol
@@ -47,6 +68,9 @@ Transport Layer         Datagram        UDP                     (Datagram of byt
 Link Layer              Frame           SLIP                    (Frame of bytes, can be garbled)
 Phyisical Layer         Bytes           RS232                   (byte-wide transmission, can be unreliable)
 
+Transport Layer         Bridge Crc Packet
+Link Layer              Frame           SLIP                    (Frame of bytes, can be garbled)
+Phyisical Layer         Bytes           RS232                   (byte-wide transmission, can be unreliable)
 
 --------------------------------------------------------------------------}
 
@@ -173,6 +197,7 @@ data Realistic a = Realistic
 instance Default (Realistic a) where
 	def = Realistic 0 0 0 0 0 (\ g a -> a)
 
+{-
 connectBridges :: (Show msg) => Bridge msg -> Realistic msg -> Realistic msg -> Bridge msg -> IO ()
 connectBridges lhs lhsOut rhsOut rhs = do
 	let you :: Float -> IO Bool
@@ -219,3 +244,5 @@ connectBridges lhs lhsOut rhsOut rhs = do
         forever $ do
                 msg <- fromBridge rhs
                 unrely tmVar2 rhsOut msg $ toBridge lhs
+-}
+-}

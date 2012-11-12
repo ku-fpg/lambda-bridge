@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 --
 -- | Support for providing a Frame-based API on top of an bytestream, using SLIP.
 --    * http://en.wikipedia.org/wiki/Serial_Line_Internet_Protocol
@@ -18,7 +19,7 @@ import Control.Monad
 import Network.LambdaBridge.Logging (debugM)
 import Network.LambdaBridge.Bridge
 
-slipProtocol :: Bridge Bytes -> IO (Bridge Frame)
+slipProtocol :: Bridge framing integrity -> IO (Bridge Framed integrity)
 slipProtocol bytes_bridge = do
         let debug = debugM "lambda-bridge.slip"
 
@@ -32,17 +33,17 @@ slipProtocol bytes_bridge = do
                         | c == esc  = [esc, esc_esc]
                         | otherwise = [c]
 
-        let sendFrame = \ (Frame bs) -> do
+        let sendFrame = \ bs -> do
                 let packet = [end]
                           ++ concatMap bytestuff (BS.unpack bs)
                           ++ [end]
-                toBridge bytes_bridge (Bytes (BS.pack packet))
+                toBridge bytes_bridge $ BS.pack packet
 
 
         ch <- newEmptyMVar
 
         forkIO $ forever $ do
-                Bytes bs <- fromBridge bytes_bridge
+                bs <- fromBridge bytes_bridge
                 sequence_ [ putMVar ch b
                           | b <- BS.unpack bs
                           ]
@@ -52,7 +53,7 @@ slipProtocol bytes_bridge = do
         let recvFrame bs = do
                 b <- nextByte
                 if b == end then if null bs then recvFrame []
-                                            else return $ Frame $ BS.pack $ reverse bs
+                                            else return $ BS.pack $ reverse bs
                             else recvFrame' b bs
 
             recvFrame' b bs | b == esc = do

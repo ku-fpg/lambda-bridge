@@ -1,7 +1,7 @@
 
 -- | Support for providing a Frame-based API on top of an unreliable bytestream.
 
-module Network.LambdaBridge.Frame
+module Network.LambdaBridge.Frame where
 	( frameProtocol
 	, maxFrameSize
 	, crc
