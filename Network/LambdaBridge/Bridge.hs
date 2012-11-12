@@ -4,60 +4,65 @@ module Network.LambdaBridge.Bridge where
 
 import Network.LambdaBridge.Logging
 
-import Data.Word as W
-import System.Random
-import Data.Default
-import Control.Concurrent
-import Control.Concurrent.MVar
-import Control.Concurrent.Chan
-import Numeric
-import Data.Word
-import Data.Binary
-import Data.Binary.Get as Get
-import Data.Binary.Put as Put
-import qualified Data.ByteString.Lazy as LBS
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.Time.Clock
 import Control.Exception as Exc
-import Control.Monad
-import Control.Concurrent.Chan
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TVar
-
-import System.IO.Unsafe (unsafeInterleaveIO)
+import Control.Concurrent.MVar
 
 debug = debugM "lambda-bridge.bridge"
 
-data Fragmentation     = Framed                 -- sequence of bytes that stay together
-                       | Fragmented             -- can arived in fragements, or joined
+data Fragmentation     = Framed                 -- ^ sequence of bytes that stay together
+                       | Streamed               -- ^ can arived in fragements, or joined
 
 -- Later, add concept of reliableness, which implies checked
-data Integrity         = Reliable               -- CRC'd + will get there
-                       | Checked                -- CRC'd
-                       | UnChecked              -- raw bytes
+data Integrity         = Checked                -- ^ CRC'd
+                       | UnChecked              -- ^ raw bytes
+
+data Delivery          = Reliable               -- ^ will alway get there
+                       | UnReliable             -- ^ may not get there
 
 -- | A 'Bridge' is a bidirectional connection to a specific remote API.
 -- There are many different types of Bridges in the lambda-bridge API.
 
+-- data Property           = Framed
+
 data Bridge (fragmentation :: Fragmentation)
             (integrity     :: Integrity)
+            (delivery      :: Delivery)
    = Bridge
         { toBridge 	:: BS.ByteString -> IO ()  -- ^ write to a bridge; may block; called many times.
 	, fromBridge	:: IO BS.ByteString        -- ^ read from a bridge; may block, called many times.
         }
 
-{--------------------------------------------------------------------------
+{-------------------------------------------------------------------
+                Framed                                  Fragmented
+
+                Checked         UnChecked               Checked         UnChecked
+
+Reliable        TCP             SLIP                    Socket(TCP)     (*1)
+
+UnReliable      UDP             SLIP                    (*2)            RS232
+
+Can you be Fragmented, Checked, but UnReliable?
+Can you be Fragmented, UnChecked, but Reliable?
+When Fragmented, the concepts of Reliable and Checked collapse into one??
+
+(*1) = every char gets through, some are scrambled.
+(*2) = every char that gets through was sent in that order.
+
+
+
+-------------------------------------------------------------------------
 
 Layer           Datatype                        Example of Protocol
 
-Transport       Bridge Framed Checked           UDP     (Datagram of bytes, checked by CRC)
-Link            Bridge Framed Unchecked         SLIP    (Frame of bytes, can be garbled)
-Physical        Bridge Fragmented Unchecked     RS232   (byte-wise transmission, can be unreliable)
+Transport       Bridge Framed Checked UnReliable           UDP     (Datagram of bytes, checked by CRC)
+Link            Bridge Framed Unchecked  UnReliable       SLIP    (Frame of bytes, can be garbled)
+Physical        Bridge Fragmented Unchecked UnReliable    RS232   (byte-wise transmission, can be unreliable)
 
 --------------------------------------------------------------------------}
 
-debugBridge :: String -> Bridge f i -> IO (Bridge f i)
+debugBridge :: String -> Bridge f i r -> IO (Bridge f i r)
 debugBridge name bridge = do
 	sendCounter <- newMVar 0
 	recvCounter <- newMVar 0

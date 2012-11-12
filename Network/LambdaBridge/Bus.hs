@@ -19,17 +19,12 @@ import Data.ByteString (ByteString)
 
 import Control.Monad.Operational
 
+-------------------------------------------------------------------
 
-{-
-data BusCmdPacket = BusCmdPacket U16 [BusCmd]
-
-data BusCmd
-        = WriteBus U16 U8               -- single read
-        | ReadBus U16                   -- single write
-        | ReplyBus U8                   -- Send back a specific msg
-
-data BusReplyPacket = BusReplyPacket U16 [U8]
--}
+-- | 'Board' is a handle into a board
+newtype Board = Board
+  { send :: forall a . BusM (Remote a) -> IO (Maybe a)      -- ^ run a transaction on the 'Board', please.
+  }
 
 data Remote a
         = Symbol
@@ -53,10 +48,6 @@ type BusM a = Program BusCmd a
 
 done :: BusM (Remote ())
 done = return (pure ())
-
-newtype Board = Board
-  { send :: forall a . BusM (Remote a) -> IO (Maybe a)      -- Will time out in a Board-specific way
-  }
 
 cmdToRequest :: BusM a -> Writer [Word8] a
 cmdToRequest = interp $ \ cmd -> case cmd of
@@ -143,7 +134,7 @@ brd = Board $ error ""
 -- | connectBoard takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
 -- an abstact handle to the physical board.
-connectToBoard :: Float -> Bridge Framed Checked -> IO Board
+connectToBoard :: Float -> Bridge Framed Checked UnReliable -> IO Board
 connectToBoard timeoutTime bridge = do
 
         uniq :: MVar Word16 <- newEmptyMVar
@@ -227,7 +218,7 @@ showBusFrame :: BusFrame -> BS.ByteString
 showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
 -- not sure about remote here
-interpBus :: (forall a . BusM (Remote a) -> IO (Maybe a)) -> IO (Bridge Framed Checked)
+interpBus :: (forall a . BusM (Remote a) -> IO (Maybe a)) -> IO (Bridge Framed Checked UnReliable)
 interpBus cmd = do
         cmdChan <- newChan
         resChan <- newChan

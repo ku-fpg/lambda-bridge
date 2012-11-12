@@ -19,7 +19,7 @@ import Control.Monad
 import Network.LambdaBridge.Logging (debugM)
 import Network.LambdaBridge.Bridge
 
-slipProtocol :: Bridge framing integrity -> IO (Bridge Framed integrity)
+slipProtocol :: Bridge framing integrity delivery -> IO (Bridge Framed integrity delivery)
 slipProtocol bytes_bridge = do
         let debug = debugM "lambda-bridge.slip"
 
