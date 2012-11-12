@@ -2,6 +2,8 @@
 
 module Network.LambdaBridge.Bridge where
 
+import Network.LambdaBridge.Logging
+
 import Data.Word as W
 import System.Random
 import Data.Default
@@ -25,143 +27,37 @@ import Control.Concurrent.STM.TVar
 
 import System.IO.Unsafe (unsafeInterleaveIO)
 
--- | A 'Bridge' is a bidirectional connection to a specific remote API.
--- There are many different types of Bridges in the lambda-bridge API.
-{-
-data Bridge msg = Bridge
-	{ toBridge 	:: msg -> IO ()	-- ^ write to a bridge; may block; called many times.
-	, fromBridge	:: IO msg	-- ^ read from a bridge; may block, called many times.
-					--   The expectation is that *eventually* after some
-					--   time and/or computation
-					--   someone will read from the bridge, and the
-					--   reading does not depend on any external interaction or events.
-	}
+debug = debugM "lambda-bridge.bridge"
 
--}
-data Fragmentation      = Framed | Fragmented
+data Fragmentation     = Framed                 -- sequence of bytes that stay together
+                       | Fragmented             -- can arived in fragements, or joined
 
 -- Later, add concept of reliableness, which implies checked
 data Integrity         = Reliable               -- CRC'd + will get there
                        | Checked                -- CRC'd
                        | UnChecked              -- raw bytes
 
-data Bridge (framention :: Fragmentation)
-             (error     :: Integrity)
+-- | A 'Bridge' is a bidirectional connection to a specific remote API.
+-- There are many different types of Bridges in the lambda-bridge API.
+
+data Bridge (fragmentation :: Fragmentation)
+            (integrity     :: Integrity)
    = Bridge
-        { toBridge 	:: BS.ByteString -> IO ()	-- ^ write to a bridge; may block; called many times.
-	, fromBridge	:: IO BS.ByteString	-- ^ read from a bridge; may block, called many times.
-					--   The expectation is that *eventually* after some
-					--   time and/or computation
-					--   someone will read from the bridge, and the
-					--   reading does not depend on any external interaction or events.
+        { toBridge 	:: BS.ByteString -> IO ()  -- ^ write to a bridge; may block; called many times.
+	, fromBridge	:: IO BS.ByteString        -- ^ read from a bridge; may block, called many times.
         }
 
-
-{-
 {--------------------------------------------------------------------------
 
-Layer                   Datatype        Example of Protocol
+Layer           Datatype                        Example of Protocol
 
-
-Application Layer       -               Custom Bus Protocol
-Transport Layer         Datagram        UDP                     (Datagram of bytes, checked by CRC)
-Link Layer              Frame           SLIP                    (Frame of bytes, can be garbled)
-Phyisical Layer         Bytes           RS232                   (byte-wide transmission, can be unreliable)
-
-Transport Layer         Bridge Crc Packet
-Link Layer              Frame           SLIP                    (Frame of bytes, can be garbled)
-Phyisical Layer         Bytes           RS232                   (byte-wide transmission, can be unreliable)
+Transport       Bridge Framed Checked           UDP     (Datagram of bytes, checked by CRC)
+Link            Bridge Framed Unchecked         SLIP    (Frame of bytes, can be garbled)
+Physical        Bridge Fragmented Unchecked     RS232   (byte-wise transmission, can be unreliable)
 
 --------------------------------------------------------------------------}
 
-
---------------------------------------------------------------------------
--- | A 'Bridge (of) Byte' is for talking one byte at a time, where the
--- byte may or may not get there, and may get garbled.
---
--- An example of a 'Bridge (of) Byte' is a RS-232 link.
-
-newtype Byte = Byte W.Word8 deriving (Eq,Ord)
-
-instance Show Byte where
-   show (Byte w) = "0x" ++ showHex w ""
-
---------------------------------------------------------------------------
-
--- | A 'Bridge (of) Bytes' is for talking one byte at a time, where the
--- byte may or may not get there, and may get garbled. The Bytes are
--- sent in order. We provide Bytes because the underlying transportation
--- mechansim *may* choose to send many bytes at the same time.
--- Sending a empty sequence Bytes returns without communications,
--- and it is not possible to receive a empty sequence of bytes.
---
--- An example of a 'Bridge (of) Bytes' is a RS-232 link.
-
-newtype Bytes = Bytes BS.ByteString deriving (Eq,Ord)
-
-instance Show Bytes where
-   show (Bytes ws) = "Bytes " ++ show [Byte w | w <- BS.unpack ws ]
-
---------------------------------------------------------------------------
--- | A 'Bridge (of) Frame' is small set of bytes, where a Frame may
--- or may not get to the destination, but if received, will
--- not be garbled or fragmented (via CRC or equiv).
--- There is typically an implementation specific maximum size of a Frame.
-
--- An example of a 'Bridge (of) Frame' is UDP.
-
-newtype Frame = Frame BS.ByteString
-
-instance Show Frame where
-   show (Frame wds) = "Frame " ++ show [ Byte w | w <- BS.unpack wds ]
-
-instance Binary Frame where
-        put (Frame bs) = put bs
-        get = liftM Frame get
-
--- | A way of turning a Frame into its contents, using the 'Binary' class.
--- This may throw an async exception.
-fromFrame :: (Binary a) => Frame -> a
-fromFrame (Frame fs) = decode (LBS.fromChunks [fs])
-
--- | A way of turning something into a Frame, using the 'Binary' class.
-toFrame :: (Binary a) => a -> Frame
-toFrame a = Frame $ BS.concat $ LBS.toChunks $ encode a
-
-
---------------------------------------------------------------------------
--- | A 'Bridge (of) Datagram' is small set of bytes, where a Datagram may
--- or may not get to the destination, but if received, will
--- not be garbled or fragmented (via CRC or equiv).
--- There is typically an implementation specific maximum size of a Datagram.
-
--- An example of a 'Bridge (of) Datagram' is UDP.
-
-newtype Datagram = Datagram BS.ByteString
-
-instance Show Datagram where
-   show (Datagram wds) = "Datagram " ++ show [ Byte w | w <- BS.unpack wds ]
-
-instance Binary Datagram where
-        put (Datagram bs) = put bs
-        get = liftM Datagram get
-
--- | A way of turning a Frame into its contents, using the 'Binary' class.
--- This may throw an async exception.
-fromDatagram :: (Binary a) => Datagram -> a
-fromDatagram (Datagram fs) = decode (LBS.fromChunks [fs])
-
--- | A way of turning something into a Frame, using the 'Binary' class.
-toDatagram :: (Binary a) => a -> Datagram
-toDatagram a = Datagram $ BS.concat $ LBS.toChunks $ encode a
-
-
---------------------------------------------------------------------------
-
--- | 'debugBridge' outputs to the stderr debugging messages
--- about what datum is getting send where.
-
-debugBridge :: (Show msg) => String -> Bridge msg -> IO (Bridge msg)
+debugBridge :: String -> Bridge f i -> IO (Bridge f i)
 debugBridge name bridge = do
 	sendCounter <- newMVar 0
 	recvCounter <- newMVar 0
@@ -170,18 +66,21 @@ debugBridge name bridge = do
 		{ toBridge = \ a -> do
 			count <- takeMVar sendCounter
 			putMVar sendCounter (succ count)
-			putStrLn $ name ++ ":toBridge<" ++ show count ++ "> (" ++ show a ++ ")"
+			debug $ name ++ ":toBridge<" ++ show count ++ "> (" ++ show a ++ ")"
 			() <- toBridge bridge a
-			putStrLn $  name ++ ":toBridge<" ++ show count ++ "> success"
+			debug $  name ++ ":toBridge<" ++ show count ++ "> success"
 		, fromBridge = do
 			count <- takeMVar recvCounter
 			putMVar recvCounter (succ count)
-			putStrLn $  name ++ ":fromBridge<" ++ show count ++ ">"
-			a <- fromBridge bridge `Exc.catch` \ (e :: SomeException) -> do { print e ; throw e }
-			putStrLn $  name ++ ":fromBridge<" ++ show count ++ "> (" ++ show a ++ ")"
+			debug $  name ++ ":fromBridge<" ++ show count ++ ">"
+			a <- fromBridge bridge `Exc.catch` \ (e :: SomeException) -> do { debug (show e) ; throw e }
+			debug $  name ++ ":fromBridge<" ++ show count ++ "> (" ++ show a ++ ")"
 			return a
 		}
 
+{-
+
+-- To be added later
 
 -- |  ''Realistic'' is the configuration for ''realisticBridge''.
 data Realistic a = Realistic
@@ -196,6 +95,7 @@ data Realistic a = Realistic
 -- | default instance of 'realistic', which is completely reliable.
 instance Default (Realistic a) where
 	def = Realistic 0 0 0 0 0 (\ g a -> a)
+
 
 {-
 connectBridges :: (Show msg) => Bridge msg -> Realistic msg -> Realistic msg -> Bridge msg -> IO ()
