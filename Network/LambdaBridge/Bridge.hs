@@ -1,6 +1,12 @@
 {-# LANGUAGE RankNTypes, ScopedTypeVariables, GADTs, DataKinds, KindSignatures #-}
 
-module Network.LambdaBridge.Bridge where
+module Network.LambdaBridge.Bridge
+        ( Bridge(..)
+        , Fragmentation(..)
+        , Integrity(..)
+        , Delivery(..)
+        , debugBridge
+        ) where
 
 import Network.LambdaBridge.Logging
 
@@ -14,7 +20,6 @@ debug = debugM "lambda-bridge.bridge"
 data Fragmentation     = Framed                 -- ^ sequence of bytes that stay together
                        | Streamed               -- ^ can arived in fragements, or joined
 
--- Later, add concept of reliableness, which implies checked
 data Integrity         = Checked                -- ^ CRC'd
                        | UnChecked              -- ^ raw bytes
 
@@ -23,8 +28,6 @@ data Delivery          = Reliable               -- ^ will alway get there
 
 -- | A 'Bridge' is a bidirectional connection to a specific remote API.
 -- There are many different types of Bridges in the lambda-bridge API.
-
--- data Property           = Framed
 
 data Bridge (fragmentation :: Fragmentation)
             (integrity     :: Integrity)
