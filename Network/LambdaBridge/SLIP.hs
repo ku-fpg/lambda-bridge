@@ -72,3 +72,15 @@ slipProtocol bytes_bridge = do
 
         return $ Bridge { toBridge = sendFrame, fromBridge = recvFrame [] }
 
+{-
+-- We tag the End-of-Frame
+data FrameEnd a = FrameEnd a Bool
+ --  FramedAtEnd
+
+slipTX :: Bus U8 -> Fabric (Bus (FrameEnd U8))
+slipRX :: Bus (FrameEnd U8) -> Fabric (Bus U8)
+
+udpTX :: Bus (FrameEnd U8) -> F (Bus (FramedEnd U8))
+
+-}
+
