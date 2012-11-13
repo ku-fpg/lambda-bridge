@@ -211,9 +211,10 @@ readBusFrame bs0 =
 showBusFrame :: BusFrame -> BS.ByteString
 showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
--- not sure about remote here
-interpBus :: (forall a . BusM (Remote a) -> IO (Maybe a)) -> IO (Bridge Framed Checked)
-interpBus cmd = do
+-- This is used for testing the serialization of the Board commands
+
+interpBus :: Board -> IO (Bridge Framed Checked)
+interpBus (Board cmd) = do
         cmdChan <- newChan
         resChan <- newChan
 
