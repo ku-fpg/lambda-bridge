@@ -10,6 +10,7 @@ import Control.Concurrent.Chan
 import Control.Applicative
 import Data.Monoid
 import Data.Word
+import Data.Bits
 import Control.Monad.Writer
 import Control.Monad.State
 import Data.Map as Map hiding (singleton)
@@ -234,13 +235,146 @@ interpBus (Board cmd) = do
                         }
 
 
-
 rpc :: ([Word8] -> IO [Word8]) -> IO (BusM (Remote a) -> IO (Maybe a))
 rpc f = undefined
 
+
+-- Move the addresses of a command by a specific
+offset :: Word16 -> BusM a -> BusM a
+offset n = interp $ \ cmd -> case cmd of
+        BusWrite addr val -> busWrite (addr + n) val
+        BusRead addr      -> busRead (addr + n)
+
+
+myBus v1 = virtualBus
+        [ (0,   rxMVarToRpc v1 >>= rpcPort)
+        ]
+
+
+virtualBus :: [(Word16, IO VirtualBusCommand)] -> IO VirtualBusCommand
+virtualBus = Prelude.foldr fn
+           $ return
+           $ VirtualBusCommand
+           $ \ _ -> return Nothing
+  where
+          fn (off, fn) rest = do
+                  VirtualBusCommand this <- fn
+                  VirtualBusCommand that <- rest
+                  return $ VirtualBusCommand $ \ cmd -> do
+                        r <- this (offset (-off) cmd)   -- normalize command to zero
+                        case r of
+                          Nothing -> that cmd
+                          Just r -> return (Just r)
+
+newtype VirtualBusCommand = VirtualBusCommand (forall a. BusM (Remote a) -> IO (Maybe a))
+
+data Rpc = Rpc
+        { push :: Word8 -> IO ()
+        , pull :: IO Word8
+        , tag  :: IO Word8
+        }
+
+nullRpc t = Rpc { push = \ _ -> return ()
+                , pull = return 0
+                , tag = return t
+                }
+
+rxMVarToRpc :: MVar Word8 -> IO (Word8 -> IO Rpc)
+rxMVarToRpc mvar = do
+        cur_tag <- newMVar (0 :: Word8)
+
+        pushFn <- newEmptyMVar
+
+        let pushVal0 val = do
+                b <- tryPutMVar mvar val
+                case b of
+                  True -> do
+                        modifyMVar_ cur_tag (return . (`xor` 0x01))
+                        putMVar pushFn pushVal1
+                  False -> do
+                        putMVar pushFn pushVal1
+                return ()
+            pushVal1 _ = putMVar pushFn pushVal1
+
+        return $ \ t -> do
+           t_s <- readMVar cur_tag
+           -- start the ball rolling
+           _ <- tryTakeMVar pushFn
+           putMVar pushFn pushVal0
+           return $ if t == t_s then Rpc { push = \ val -> takeMVar pushFn >>= \ f -> f val
+                                         , pull = return 0
+                                         , tag  = readMVar cur_tag
+                                         }
+                    else nullRpc t_s
+
+txMVarToRpc :: MVar Word8 -> IO (Word8 -> IO Rpc)
+txMVarToRpc mvar = do
+        cur_tag <- newMVar (0 :: Word8)
+
+        pullFn <- newEmptyMVar
+
+        let pullVal0 = do
+                b <- tryTakeMVar mvar
+                case b of
+                  Just val-> do
+                        modifyMVar_ cur_tag (return . (`xor` 0x01))
+                        putMVar pullFn pullVal1
+                        return val
+                  Nothing -> do
+                        putMVar pullFn pullVal1
+                        return 0
+            pullVal1 = do
+                    putMVar pullFn pullVal1
+                    return 0
+
+        return $ \ t -> do
+           t_s <- readMVar cur_tag
+           -- start the ball rolling
+           _ <- tryTakeMVar pullFn
+           putMVar pullFn pullVal0
+           return $ if t == t_s then Rpc { push = \ _ -> return ()
+                                         , pull = takeMVar pullFn >>= \ f -> f
+                                         , tag  = readMVar cur_tag
+                                         }
+                    else nullRpc t_s
+
+
+rpcPort :: (Word8 -> IO Rpc) -> IO VirtualBusCommand
+rpcPort call = do
+        state <- newMVar $ nullRpc 0
+        let getState m = do
+                r <- takeMVar state
+                m r
+        let newState n = do
+                putMVar state n
+
+        let fCmd :: Rpc -> BusCmd a -> IO a
+            fCmd _ (BusWrite 0 val) = do
+                   rpc <- call val
+                   modifyMVar_ state (\ _ -> return rpc)
+                   return ()
+            fCmd rpc (BusWrite 1 val) = do
+                   push rpc val
+                   return ()
+            fCmd rpc (BusRead 0) = do
+                   ret <- tag rpc
+                   return (pure ret)
+            fCmd rpc (BusRead 1) = do
+                   ret <- pull rpc
+                   return (pure ret)
+
+        return $ VirtualBusCommand $ \ m -> do
+                r <- interp (\ cmd -> do st <- readMVar state
+                                         fCmd st cmd) m
+                return Nothing
+
+
+
+-- memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
+
 {-
 
---memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
+memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
 
 data WriterState = WriterStart | WriterPushed Word8 | WriterTagged Word8 Word8
         deriving (Eq,Show)
