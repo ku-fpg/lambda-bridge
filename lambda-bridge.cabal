@@ -36,6 +36,7 @@ Library
   Exposed-Modules:     Network.LambdaBridge
                        Network.LambdaBridge.Bridge
                        Network.LambdaBridge.Bus
+                       Network.LambdaBridge.CRC
                        Network.LambdaBridge.Socket
                        Network.LambdaBridge.SLIP
                        Network.LambdaBridge.Timeout
