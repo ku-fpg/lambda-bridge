@@ -6,6 +6,13 @@ module Network.LambdaBridge.Bridge
         , Integrity(..)
         , Delivery(..)
         , debugBridge
+        , connection
+        , echo
+        , serialize
+        , unchecked
+        , checked
+        , noise
+        , buffer
         ) where
 
 import Network.LambdaBridge.Logging
@@ -14,6 +21,11 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Control.Exception as Exc
 import Control.Concurrent.MVar
+import Control.Concurrent
+import Control.Monad
+import Data.Word
+import Data.String
+import System.Random
 
 debug = debugM "lambda-bridge.bridge"
 
@@ -92,6 +104,88 @@ debugBridge name bridge = do
 			debug $  name ++ ":fromBridge<" ++ show count ++ "> (" ++ show a ++ ")"
 			return a
 		}
+
+
+
+-- | for simulations and testing, provide two bridges, and connect them underneath.
+connection :: IO (Bridge framing Trustworthy,Bridge framing Trustworthy)
+connection = do
+        v1 <- newEmptyMVar
+        v2 <- newEmptyMVar
+        return ( Bridge { toBridge = putMVar v2
+                        , fromBridge = takeMVar v1
+                        }
+               , Bridge { toBridge = putMVar v1
+                        , fromBridge = takeMVar v2
+                        }
+               )
+
+-- | cap a bridge with a simple echo.
+echo :: (ByteString -> ByteString) -> Bridge framing integrity -> IO ()
+echo f bridge = do
+        v <- newEmptyMVar
+        forkIO $ forever $ do
+                bs <- fromBridge bridge
+                toBridge bridge (f bs)
+        return ()
+
+
+-- | Downgrade a framed bridge to a streamed bridge.
+serialize :: Bridge Framed Trustworthy -> Bridge Streamed Trustworthy
+serialize (Bridge to from) = Bridge to from
+
+-- | Downgrade an unchecked bridge
+unchecked :: Bridge framing integrity  -> Bridge framing Unchecked
+unchecked  (Bridge to from) = Bridge to from
+
+-- | Downgrade an checked bridge from a trustworthy bridge
+checked :: Bridge framing Trustworthy  -> Bridge framing Checked
+checked  (Bridge to from) = Bridge to from
+
+
+-- | introduce noise. By convention, only the fromBridge side
+-- has noise introduced (concept: reception is when we detect errors).
+-- 'connection' can be used to introduce bidirectional noise.
+
+noise :: Float -> Bridge Streamed integrity -> IO (Bridge Streamed Unchecked)
+noise n bridge = do
+        v_in :: MVar Word8 <- newEmptyMVar
+        v_out :: MVar Word8 <- newEmptyMVar
+
+        forkIO $ forever $ do
+                bs <- fromBridge bridge
+                sequence_ [ putMVar v_in b | b <- BS.unpack bs ]
+
+        forkIO $ forever $ do
+                r :: Float <- randomIO
+                if r < n then do -- do something else
+                                 q :: Int <- randomRIO (0,2)
+                                 case q of
+                                        -- drop the input
+                                   0 -> do _ <- takeMVar v_in
+                                           return ()
+                                        -- add a char
+                                   1 -> do w <- randomIO
+                                           putMVar v_out w
+                                           return ()
+                                        -- scramble the char
+                                   2 -> do _ <- takeMVar v_in
+                                           w <- randomIO
+                                           putMVar v_out w
+                                           return ()
+                         else do w <- takeMVar v_in
+                                 putMVar v_out w
+
+        return $ Bridge { toBridge = toBridge bridge
+                        , fromBridge = do
+                                w <- takeMVar v_out
+                                return $ BS.pack [w]
+                        }
+
+
+-- Wait this number of (sub)-seconds for rx values.
+buffer :: Float -> Bridge Streamed integrity -> IO (Bridge Streamed integrity)
+buffer n bridge = return bridge        -- TODO
 
 {-
 
