@@ -1,12 +1,15 @@
 {-# LANGUAGE DataKinds, TypeFamilies #-}
 --
 -- | Support for providing a Frame-based API on top of an bytestream, using SLIP.
---    * http://en.wikipedia.org/wiki/Serial_Line_Internet_Protocol
---    * http://tools.ietf.org/html/rfc1055
+--
+-- * <http://en.wikipedia.org/wiki/Serial_Line_Internet_Protocol>
+--
+-- * <http://tools.ietf.org/html/rfc1055>
 --
 
 module Network.LambdaBridge.SLIP
 	( slipProtocol
+	, SLIP_Integrity
 	) where
 
 
