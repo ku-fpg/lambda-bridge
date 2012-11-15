@@ -15,6 +15,9 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Data.Map as Map hiding (singleton)
 
+import Data.Array.MArray
+import Data.Array.IO (IOUArray)
+
 import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 
@@ -80,6 +83,42 @@ rxStateMachine _ (BusWrite _ _) st = return ((),st)
 rxStateMachine _ (BusRead 0) (_,x) = return (pure x, (NoGo,x))
 rxStateMachine _ (BusRead _) st    = return (invalid,st)
 
+type TxState = (Go,Word8)
+
+txInitialState :: TxState
+txInitialState = (NoGo,0)
+
+txStateMachine :: MVar Word8 -> BusCmd a -> TxState -> IO (a, TxState)
+
+txStateMachine _ (BusWrite 0 w) st@(_,x) | w == x    = return ((),(Go,w))
+                                         | otherwise = return ((),st)
+txStateMachine v (BusWrite 1 w) (Go,x) = do
+                    ok <- tryPutMVar v w
+                    return ((),(NoGo,if ok then x `xor` 0x01
+                                           else x))
+txStateMachine _ (BusWrite _ _) st = return ((),st)
+
+txStateMachine _ (BusRead 0) (_,x) = return (pure x, (NoGo,x))
+txStateMachine v (BusRead 1) (Go,x) = do
+                    r <- tryTakeMVar v
+                    case r of
+                      Nothing -> return (pure 0, (NoGo,x))
+                      Just w  -> return (pure w, (NoGo, x `xor` 0x01))
+txStateMachine _ (BusRead _) st    = return (invalid,st)
+
+type MemState = ()
+
+memStateMachine :: IOUArray Word16 Word8 -> (Word16,Word16) -> BusCmd a -> MemState -> IO (a, MemState)
+memStateMachine arr bnds (BusWrite addr dat) st
+        | inRange bnds addr = do
+                writeArray arr addr dat
+                return ((),st)
+        | otherwise = return ((),st)
+memStateMachine arr bnds (BusRead addr) st
+        | inRange bnds addr = do
+                r <- readArray arr addr
+                return (pure r, st)
+        | otherwise = return (invalid,st)
 
 testRX :: IO Word8
 testRX = do
