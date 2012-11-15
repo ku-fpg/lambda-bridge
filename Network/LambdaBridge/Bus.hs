@@ -35,18 +35,37 @@ data Remote a
         | Remote a
 
 instance Functor Remote where
-        fmap f Symbol = Symbol
+        fmap f Symbol     = Symbol
         fmap f (Remote a) = Remote (f a)
 
 instance Applicative Remote where
-        pure a = Remote a
-        Symbol <*> _ = Symbol
-        _ <*> Symbol = Symbol
+        pure a                    = Remote a
+        Symbol <*> _              = Symbol
+        _ <*> Symbol              = Symbol
         (Remote f) <*> (Remote a) = Remote (f a)
+
+instance Alternative Remote where
+        empty = Symbol
+        (Remote a) <|> _ = Remote a
+        _ <|> (Remote a) = Remote a
+        _ <|> _          = Symbol
+
+runRemote :: Remote a -> Maybe a
+runRemote (Remote a) = Just a
+runRemote Symbol     = Nothing
+
+optRemote :: Maybe a -> Remote a
+optRemote Nothing = Symbol
+optRemote (Just a) = Remote a
 
 data BusCmd :: * -> * where
         BusWrite :: Word16 -> Word8     -> BusCmd ()
         BusRead  :: Word16              -> BusCmd (Remote Word8)
+
+instance Show (BusCmd a) where
+        show (BusWrite a d) = "BusWrite " ++ show a ++ " " ++ show d
+        show (BusRead a)    = "BusRead " ++ show a
+
 
 type BusM a = Program BusCmd a
 
@@ -212,7 +231,7 @@ readBusFrame bs0 =
 showBusFrame :: BusFrame -> BS.ByteString
 showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
--- This is used for testing the serialization of the Board commands
+-- This is used for testing the serialization of the Board commands.
 
 interpBus :: Board -> IO (Bridge Framed Checked)
 interpBus (Board cmd) = do
@@ -235,226 +254,36 @@ interpBus (Board cmd) = do
                         }
 
 
-rpc :: ([Word8] -> IO [Word8]) -> IO (BusM (Remote a) -> IO (Maybe a))
-rpc f = undefined
-
-
--- Move the addresses of a command by a specific
-offset :: Word16 -> BusM a -> BusM a
-offset n = interp $ \ cmd -> case cmd of
-        BusWrite addr val -> busWrite (addr + n) val
-        BusRead addr      -> busRead (addr + n)
-
-
-myBus v1 = virtualBus
-        [ (0,   rxMVarToRpc v1 >>= rpcPort)
-        ]
-
-
-virtualBus :: [(Word16, IO VirtualBusCommand)] -> IO VirtualBusCommand
-virtualBus = Prelude.foldr fn
-           $ return
-           $ VirtualBusCommand
-           $ \ _ -> return Nothing
-  where
-          fn (off, fn) rest = do
-                  VirtualBusCommand this <- fn
-                  VirtualBusCommand that <- rest
-                  return $ VirtualBusCommand $ \ cmd -> do
-                        r <- this (offset (-off) cmd)   -- normalize command to zero
-                        case r of
-                          Nothing -> that cmd
-                          Just r -> return (Just r)
-
-newtype VirtualBusCommand = VirtualBusCommand (forall a. BusM (Remote a) -> IO (Maybe a))
-
-data Rpc = Rpc
-        { push :: Word8 -> IO ()
-        , pull :: IO Word8
-        , tag  :: IO Word8
-        }
-
-nullRpc t = Rpc { push = \ _ -> return ()
-                , pull = return 0
-                , tag = return t
-                }
-
-rxMVarToRpc :: MVar Word8 -> IO (Word8 -> IO Rpc)
-rxMVarToRpc mvar = do
-        cur_tag <- newMVar (0 :: Word8)
-
-        pushFn <- newEmptyMVar
-
-        let pushVal0 val = do
-                b <- tryPutMVar mvar val
-                case b of
-                  True -> do
-                        modifyMVar_ cur_tag (return . (`xor` 0x01))
-                        putMVar pushFn pushVal1
-                  False -> do
-                        putMVar pushFn pushVal1
-                return ()
-            pushVal1 _ = putMVar pushFn pushVal1
-
-        return $ \ t -> do
-           t_s <- readMVar cur_tag
-           -- start the ball rolling
-           _ <- tryTakeMVar pushFn
-           putMVar pushFn pushVal0
-           return $ if t == t_s then Rpc { push = \ val -> takeMVar pushFn >>= \ f -> f val
-                                         , pull = return 0
-                                         , tag  = readMVar cur_tag
-                                         }
-                    else nullRpc t_s
-
-txMVarToRpc :: MVar Word8 -> IO (Word8 -> IO Rpc)
-txMVarToRpc mvar = do
-        cur_tag <- newMVar (0 :: Word8)
-
-        pullFn <- newEmptyMVar
-
-        let pullVal0 = do
-                b <- tryTakeMVar mvar
-                case b of
-                  Just val-> do
-                        modifyMVar_ cur_tag (return . (`xor` 0x01))
-                        putMVar pullFn pullVal1
-                        return val
-                  Nothing -> do
-                        putMVar pullFn pullVal1
-                        return 0
-            pullVal1 = do
-                    putMVar pullFn pullVal1
-                    return 0
-
-        return $ \ t -> do
-           t_s <- readMVar cur_tag
-           -- start the ball rolling
-           _ <- tryTakeMVar pullFn
-           putMVar pullFn pullVal0
-           return $ if t == t_s then Rpc { push = \ _ -> return ()
-                                         , pull = takeMVar pullFn >>= \ f -> f
-                                         , tag  = readMVar cur_tag
-                                         }
-                    else nullRpc t_s
-
-
-rpcPort :: (Word8 -> IO Rpc) -> IO VirtualBusCommand
-rpcPort call = do
-        state <- newMVar $ nullRpc 0
-        let getState m = do
-                r <- takeMVar state
-                m r
-        let newState n = do
-                putMVar state n
-
-        let fCmd :: Rpc -> BusCmd a -> IO a
-            fCmd _ (BusWrite 0 val) = do
-                   rpc <- call val
-                   modifyMVar_ state (\ _ -> return rpc)
-                   return ()
-            fCmd rpc (BusWrite 1 val) = do
-                   push rpc val
-                   return ()
-            fCmd rpc (BusRead 0) = do
-                   ret <- tag rpc
-                   return (pure ret)
-            fCmd rpc (BusRead 1) = do
-                   ret <- pull rpc
-                   return (pure ret)
-
-        return $ VirtualBusCommand $ \ m -> do
-                r <- interp (\ cmd -> do st <- readMVar state
-                                         fCmd st cmd) m
-                return Nothing
-
-
-
--- memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
+-- | Board is a Monoid (who would have thought)
+instance Monoid Board where
+    mempty = Board (\ cmd -> return Nothing)
+    mappend (Board f1) (Board f2) = Board (fmap runRemote . interp cmdFn)
+        where
+            cmdFn :: BusCmd a -> IO a
+            cmdFn (BusWrite addr val) = do
+                    f1 (busWrite addr val >> return (pure ()))
+                    f2 (busWrite addr val >> return (pure ()))
+                    return ()
+            cmdFn (BusRead addr) = do
+                    r1 <- f1 (busRead addr)
+                    r2 <- f2 (busRead addr)
+                    return (optRemote (r1 <|> r2))
 
 {-
 
-memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
+        BusM (Remote a) -> IO (Maybe a)
 
-data WriterState = WriterStart | WriterPushed Word8 | WriterTagged Word8 Word8
-        deriving (Eq,Show)
+                f3 cmd = do r <- f1 cmd
+                            case r of
+                              Just a -> return (Just a)
+                              Nothing ->
 
-writer :: (Word8 -> Word8 -> IO Word8) -> IO (BusM (Remote [Word8]) -> IO (Maybe [Word8]))
-writer push = do
-        state <- newMVar WriterStart
-        let getState m = do
-                r <- takeMVar state
-                m r
-        let newState n = do
-                putMVar state n
+        let cmdFn :: BusCmd a -> IO a
+            cmdFn (BusWrite 0 val) = wt_tag rpc val
+            cmdFn (BusWrite 1 val) = push rpc val
+            cmdFn (BusWrite _ val) = return ()
+            cmdFn (BusRead 0)      = fmap pure (rd_tag rpc)
+            cmdFn (BusRead 1)      = fmap pure (rd_tag rpc)
+            cmdFn (BusRead _)      = return Symbol
 
-        let fCmd :: WriterState -> BusCmd a -> IO a
-            fCmd WriterStart            (BusWrite addr val)     | addr == 0 = do
-                   putMVar state $ WriterPushed val
-                   return ()
-            fCmd (WriterPushed s1)      (BusWrite addr val)     | addr == 1 = do
-                   putMVar state $ WriterTagged s1 val
-                   return ()
-            fCmd (WriterTagged s1 tag)  (BusRead addr)          | addr == 2 = do
-                   ret <- push s1 tag
-                   putMVar state $ WriterStart
-                   return (pure ret)
-
-            fCmd _ (BusWrite {})      = do
-                   putMVar state $ WriterStart
-                   return ()
-
-            fCmd _ (BusRead addr)      = do
-                   putMVar state $ WriterStart
-                   return Symbol        -- should never happen
-
-        return $ \ m -> do
-                r <- interp (\ cmd -> do st <- takeMVar state
-                                         fCmd st cmd) m
-                return Nothing
-{-
-                (\ cmd -> case cmd of
-                        BusWrite addr val  | addr == 0 -> getState $ \ st -> case st of
-                                WriterStart -> newState (WriterPushed val)
-                                _           -> newState WriterStart
 -}
-{-
-                        BusWrite addr tag  | addr == 1 -> getState $ \ st -> case st of
-                                WriterPushed val -> newState (WriterTagged val tag)
-                                _           -> newState WriterStart
--}
-{-
-                        BusRead addr       | addr == 2 -> do
-                           getState $ \ st -> case st of
-                                WriterTagged val tag -> do
-                                        b <- push val
-                                        if b then
-                                _           -> newState WriterStart
-                           return Symbol
--}
---                           ) m
-
-
--- NOTE: in the bytecode interpreter, we need to check the tag for legacy, and
--- do not execute out of order blocks, only new ones.
-
---reader :: IO Word8              -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
-
-
-{-
-interp :: BusM a -> IO a
-interp f = eval . view
-  where eval :: forall a . ProgramView c a -> m a
-        eval (Return a) = return a
-        eval (m :>>= i) = do
-                r <- f m
--}
-
-
---test2 = do
---        frameBridge <- interpBus $ interp $ \ cmd -> case cmd of
---                BusWrite addr val -> return ()
---                BusRead addr      -> return ()
---        return ()
--}
-
