@@ -14,6 +14,7 @@ import Data.Bits
 import Control.Monad.Writer
 import Control.Monad.State
 import Data.Map as Map hiding (singleton)
+import System.IO
 
 import Data.Array.MArray
 import Data.Array.IO (IOUArray)
@@ -92,17 +93,13 @@ txStateMachine :: MVar Word8 -> BusCmd a -> TxState -> IO (a, TxState)
 
 txStateMachine _ (BusWrite 0 w) st@(_,x) | w == x    = return ((),(Go,w))
                                          | otherwise = return ((),st)
-txStateMachine v (BusWrite 1 w) (Go,x) = do
-                    ok <- tryPutMVar v w
-                    return ((),(NoGo,if ok then x `xor` 0x01
-                                           else x))
 txStateMachine _ (BusWrite _ _) st = return ((),st)
 
 txStateMachine _ (BusRead 0) (_,x) = return (pure x, (NoGo,x))
 txStateMachine v (BusRead 1) (Go,x) = do
                     r <- tryTakeMVar v
                     case r of
-                      Nothing -> return (pure 0, (NoGo,x))
+                      Nothing -> return (pure 99, (NoGo,x))
                       Just w  -> return (pure w, (NoGo, x + 1))
 txStateMachine _ (BusRead _) st    = return (invalid,st)
 
@@ -120,29 +117,47 @@ memStateMachine arr bnds (BusRead addr) st
                 return (pure r, st)
         | otherwise = return (invalid,st)
 
-testRX :: IO Word8
+testRX :: IO ()
 testRX = do
+        hSetBuffering stdout LineBuffering
+        hSetBuffering stdout LineBuffering
         print "textRX"
-        v <- newEmptyMVar
-        let loop n = do
-                x <- takeMVar v
-                if x == 0 then print ("MVar",x :: Word8)
-                          else return ()
-                if x == n + 1 then loop (n + 1) else print ("Bad Numbers",x,n,n+1)
+        v1 <- newEmptyMVar
+        v2 <- newEmptyMVar
 
-        forkIO $ loop (-1)
+        brd0 <- stateMachineToBus rxInitialState $ rxStateMachine v1
+        brd2 <- stateMachineToBus txInitialState $ txStateMachine v1
 
-        brd <- stateMachineToBus rxInitialState $ rxStateMachine v
+        let brd = virtualBus
+                [ (0, brd0)
+                , (2, brd2)
+                ]
 
-        sendWord <- sendingLBVar 0 brd
+        var <- newEmptyMVar
+        sendToBus var brd 0
 
         let loop (x:xs) = do
 --                print ("sending",x)
-                sendWord x
+                putMVar var (BS.pack [x])
                 yield   -- helps simulator
                 loop xs
 
-        loop (take 1000 $ cycle [0..255])
+        forkIO $ loop (take 1000 $ cycle [0..255])
+
+        var <- newEmptyMVar
+        recvFromBus var brd 2
+
+        let loop n = do
+                x <- takeMVar var
+                print  ("MVar",x)
+{-
+                if x == x then print ("MVar",x :: Word8)
+                          else return ()
+-}
+--                if x == n + 1 then loop (n + 1) else print ("Bad Numbers",x,n,n+1)
+                loop (n-1)
+
+        loop (-1)
 
 
 -- memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
