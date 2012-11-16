@@ -290,23 +290,44 @@ instance Monoid Board where
 
 -----------------------------------------------------------------------------
 
-sendingLBVar :: Word16 -> Board -> IO (Word8 -> IO ())
-sendingLBVar addr brd = do
-        var <- newEmptyMVar
+sendToBus :: MVar ByteString -> Board -> Word16 -> IO ()
+sendToBus var brd addr = do
 
-        let get t = do
-                w <- takeMVar var
-                loop w t
-            loop w t = do
+        let loop :: [Word8] -> Word8 -> IO ()
+            loop [] t = do
+                bs <- takeMVar var
+                loop (BS.unpack bs) t
+            loop (w:ws) t = do
                 o <- send brd $ do
                         busWrite addr t
                         busWrite (addr + 1) w
                         busRead addr
 --                print (w,t,o)
                 case o of
-                  Just t' | t /= t' -> get t'
-                  _                 -> loop w t
+                  Just t' | t /= t' -> loop ws     t'    -- accepted
+                  _                 -> loop (w:ws) t     -- rejected
 
-        forkIO $ get 0
+        forkIO $ loop [] 0
 
-        return $ putMVar var
+        return ()
+
+recvFromBus :: MVar ByteString -> Board -> Word16 -> IO ()
+recvFromBus var brd addr = do
+
+        let loop t = do
+                o <- send brd $ do
+                        busWrite addr t
+                        w <- busRead (addr + 1)
+                        t' <- busRead addr
+                        return ((,) <$> w <*> t')
+                case o of
+                  Just (w,t') -> do
+                        print (w,t')
+                        putMVar var (BS.pack [w])
+                        loop t'
+                  Nothing -> loop t
+
+
+        forkIO $ loop 0
+
+        return ()
