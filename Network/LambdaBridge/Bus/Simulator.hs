@@ -76,7 +76,7 @@ rxStateMachine _ (BusWrite 0 w) st@(_,x) | w == x    = return ((),(Go,w))
                                          | otherwise = return ((),st)
 rxStateMachine v (BusWrite 1 w) (Go,x) = do
                     ok <- tryPutMVar v w
-                    return ((),(NoGo,if ok then x `xor` 0x01
+                    return ((),(NoGo,if ok then x + 1
                                            else x))
 rxStateMachine _ (BusWrite _ _) st = return ((),st)
 
@@ -103,7 +103,7 @@ txStateMachine v (BusRead 1) (Go,x) = do
                     r <- tryTakeMVar v
                     case r of
                       Nothing -> return (pure 0, (NoGo,x))
-                      Just w  -> return (pure w, (NoGo, x `xor` 0x01))
+                      Just w  -> return (pure w, (NoGo, x + 1))
 txStateMachine _ (BusRead _) st    = return (invalid,st)
 
 type MemState = ()
@@ -124,30 +124,25 @@ testRX :: IO Word8
 testRX = do
         print "textRX"
         v <- newEmptyMVar
-        forkIO $ forever $ do
+        let loop n = do
                 x <- takeMVar v
-                print ("MVar",x :: Word8)
-                return ()
+                if x == 0 then print ("MVar",x :: Word8)
+                          else return ()
+                if x == n + 1 then loop (n + 1) else print ("Bad Numbers",x,n,n+1)
+
+        forkIO $ loop (-1)
 
         brd <- stateMachineToBus rxInitialState $ rxStateMachine v
-        -- starts at 0
-        let loop (x:xs) t = do
-                Just t' <- send brd $ do
-                        busWrite 0 t
-                        busWrite 1 x
-                        busRead 0
 
-                yield
+        sendWord <- sendingLBVar 0 brd
 
-                send brd $ do
-                        busWrite 0 t
-                        busWrite 1 x
-                        busRead 0
+        let loop (x:xs) = do
+--                print ("sending",x)
+                sendWord x
+                yield   -- helps simulator
+                loop xs
 
-                yield
-                if (t /= t') then loop xs t' else loop (x:xs) t'
-
-        loop [0..] 0
+        loop (take 1000 $ cycle [0..255])
 
 
 -- memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
