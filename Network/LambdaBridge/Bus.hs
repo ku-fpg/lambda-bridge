@@ -287,3 +287,26 @@ instance Monoid Board where
             cmdFn (BusRead _)      = return Symbol
 
 -}
+
+-----------------------------------------------------------------------------
+
+sendingLBVar :: Word16 -> Board -> IO (Word8 -> IO ())
+sendingLBVar addr brd = do
+        var <- newEmptyMVar
+
+        let get t = do
+                w <- takeMVar var
+                loop w t
+            loop w t = do
+                o <- send brd $ do
+                        busWrite addr t
+                        busWrite (addr + 1) w
+                        busRead addr
+--                print (w,t,o)
+                case o of
+                  Just t' | t /= t' -> get t'
+                  _                 -> loop w t
+
+        forkIO $ get 0
+
+        return $ putMVar var
