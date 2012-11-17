@@ -179,17 +179,21 @@ noise n bridge = do
                                  case q of
                                         -- drop the input
                                    0 -> do _ <- takeMVar v_in
+                                           debug $ "dropping char"
                                            return ()
                                         -- add a char
                                    1 -> do w <- randomIO
+                                           debug $ "adding char"
                                            putMVar v_out w
                                            return ()
                                         -- scramble the char
                                    2 -> do _ <- takeMVar v_in
                                            w <- randomIO
+                                           debug $ "scramble char"
                                            putMVar v_out w
                                            return ()
                          else do w <- takeMVar v_in
+                                 debug $ "id char"
                                  putMVar v_out w
 
         return $ Bridge { toBridge = toBridge bridge
