@@ -38,14 +38,11 @@ Library
                        Network.LambdaBridge.Bridge
                        Network.LambdaBridge.Bus
                        Network.LambdaBridge.CRC
-                       Network.LambdaBridge.MVar
                        Network.LambdaBridge.Handle
                        Network.LambdaBridge.Serial
                        Network.LambdaBridge.Socket
                        Network.LambdaBridge.Server
                        Network.LambdaBridge.SLIP
-                       Network.LambdaBridge.Timeout
-
   Other-modules:
                        Network.LambdaBridge.Logging
 
