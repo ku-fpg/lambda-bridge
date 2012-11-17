@@ -32,6 +32,7 @@ Library
                    hslogger, 
                    unix >= 2.4,
                    mtl >= 2.1.2,
+                   serialport >= 0.4.5,
                    operational >= 0.2.1.3
   Exposed-Modules:     Network.LambdaBridge
                        Network.LambdaBridge.Bridge
@@ -39,6 +40,7 @@ Library
                        Network.LambdaBridge.CRC
                        Network.LambdaBridge.MVar
                        Network.LambdaBridge.Handle
+                       Network.LambdaBridge.Serial
                        Network.LambdaBridge.Socket
                        Network.LambdaBridge.SLIP
                        Network.LambdaBridge.Timeout
