@@ -147,7 +147,6 @@ unseq16 [h,l] = fromIntegral h * 256 + fromIntegral l
 
 -- | connectBoard takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
--- an abstact handle to the physical board.
 connectToBoard :: Float -> Bridge Framed Checked -> IO Board
 connectToBoard timeoutTime bridge = do
 
@@ -231,28 +230,24 @@ readBusFrame bs0 =
 showBusFrame :: BusFrame -> BS.ByteString
 showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
--- This is used for testing the serialization of the Board commands.
 
-interpBus :: Board -> IO (Bridge Framed Checked)
-interpBus (Board cmd) = do
-        cmdChan <- newChan
-        resChan <- newChan
+-- This is used for testing the serialization of the Board commands.
+--
+-- TODO: consider calling this use of Board/Bus VirtualBus, or simulator.
+interpBus :: Bridge Framed Checked -> Board -> IO ()
+interpBus bridge (Board cmd) = do
 
         forkIO $ forever $ do
-                frame <- readChan cmdChan
+                frame <- fromBridge bridge
                 case readBusFrame frame of
                   Nothing -> return ()
                   Just (BusFrame uq ws) -> do
                         ret <- cmd $ reifyBusCmd ws
                         case ret of
                           Nothing -> return ()
-                          Just ws' -> writeChan resChan (showBusFrame $ BusFrame uq ws')
+                          Just ws' -> toBridge bridge (showBusFrame $ BusFrame uq ws')
                         return ()
-
-        return $ Bridge { toBridge = writeChan cmdChan
-                        , fromBridge = readChan resChan
-                        }
-
+        return ()
 
 -- | Board is a Monoid (who would have thought)
 instance Monoid Board where
@@ -290,8 +285,14 @@ instance Monoid Board where
 
 -----------------------------------------------------------------------------
 
-sendToBus :: MVar ByteString -> Board -> Word16 -> IO ()
-sendToBus var brd addr = do
+data WritePort = WritePort (MVar ByteString)
+
+writePort :: WritePort -> ByteString -> IO ()
+writePort (WritePort v) = putMVar v
+
+busWritePort :: Board -> Word16 -> IO WritePort
+busWritePort brd addr = do
+        var <- newEmptyMVar
 
         let loop :: [Word8] -> Word8 -> IO ()
             loop [] t = do
@@ -309,10 +310,16 @@ sendToBus var brd addr = do
 
         forkIO $ loop [] 0
 
-        return ()
+        return $ WritePort $ var
 
-recvFromBus :: MVar ByteString -> Board -> Word16 -> IO ()
-recvFromBus var brd addr = do
+data ReadPort = ReadPort (MVar ByteString)
+
+readPort :: ReadPort -> IO ByteString
+readPort (ReadPort v) = takeMVar v
+
+busReadPort :: Board -> Word16 -> IO ReadPort
+busReadPort brd addr = do
+        var <- newEmptyMVar
 
         let loop t = do
                 o <- send brd $ do
@@ -321,13 +328,12 @@ recvFromBus var brd addr = do
                         t' <- busRead addr
                         return ((,) <$> w <*> t')
                 case o of
-                  Just (w,t') -> do
-                        print (w,t')
+                  Just (w,t') | t /= t' -> do
+--                        print (w,t')
                         putMVar var (BS.pack [w])
                         loop t'
-                  Nothing -> loop t
-
+                  _ -> loop t
 
         forkIO $ loop 0
 
-        return ()
+        return $ ReadPort $ var

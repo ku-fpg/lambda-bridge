@@ -99,7 +99,7 @@ txStateMachine _ (BusRead 0) (_,x) = return (pure x, (NoGo,x))
 txStateMachine v (BusRead 1) (Go,x) = do
                     r <- tryTakeMVar v
                     case r of
-                      Nothing -> return (pure 99, (NoGo,x))
+                      Nothing -> return (pure 0, (NoGo,x))
                       Just w  -> return (pure w, (NoGo, x + 1))
 txStateMachine _ (BusRead _) st    = return (invalid,st)
 
@@ -117,6 +117,7 @@ memStateMachine arr bnds (BusRead addr) st
                 return (pure r, st)
         | otherwise = return (invalid,st)
 
+{-
 testRX :: IO ()
 testRX = do
         hSetBuffering stdout LineBuffering
@@ -158,7 +159,7 @@ testRX = do
                 loop (n-1)
 
         loop (-1)
-
+-}
 
 -- memory :: IOUArray Word16 Word8 -> BusM (Remote [Word8]) -> IO (Maybe [Word8])
 
