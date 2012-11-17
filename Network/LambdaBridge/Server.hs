@@ -12,23 +12,7 @@ import Network.LambdaBridge.Bridge
 import Network.LambdaBridge.Logging
 import Network.LambdaBridge.Handle
 
-import System.IO
-import Data.Char
-import System.Directory
-import Control.Exception
-import Control.Monad
-import Data.Char
-import System.IO.Unsafe
-import Data.Binary
-import Data.Binary.Get
-import qualified Data.ByteString as BS
-import Control.Concurrent
-
-
-
 import Network
---import Network.Socket hiding (send, sendTo, recv, recvFrom)
---import Network.Socket.ByteString
 
 debug = debugM "lambda-bridge.server"
 

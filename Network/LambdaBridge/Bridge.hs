@@ -1,12 +1,17 @@
 {-# LANGUAGE RankNTypes, ScopedTypeVariables, GADTs, DataKinds, KindSignatures #-}
 
 module Network.LambdaBridge.Bridge
-        ( Bridge(..)
+        ( -- * Bridge
+         Bridge(..)
         , Fragmentation(..)
         , Integrity(..)
-        , debugBridge
+        -- * Bridge Roots
         , connection
+        , mVarBridge
+        -- * Bridge Caps
         , echo
+        -- * Bridge Lifters
+        , debugBridge
         , serialize
         , unchecked
         , checked
@@ -63,6 +68,35 @@ Physical        Bridge Fragmented Unchecked     RS232   (byte-wise transmission,
 
 --------------------------------------------------------------------------}
 
+
+-- | for simulations and testing, provide two bridges, and connect them underneath.
+connection :: IO (Bridge Framed Trustworthy,Bridge Framed Trustworthy)
+connection = do
+        v1 <- newEmptyMVar
+        v2 <- newEmptyMVar
+        b1 <- mVarBridge v1 v2
+        b2 <- mVarBridge v2 v1
+        return (b1,b2)
+
+-- | This turns a input MVar and output MVar into a trustworthy bridge of frames.
+-- Note that empty bytestrings are not supported (discarded by toBridge; ignored by fromBridge).
+
+mVarBridge :: MVar ByteString -> MVar ByteString -> IO (Bridge Framed Trustworthy)
+mVarBridge in_var out_var = do
+        return $ Bridge
+               { toBridge = \ bs ->
+                        if BS.null bs
+                        then return ()
+                        else putMVar out_var bs
+               , fromBridge =
+                        let loop = do
+                                bs <- takeMVar in_var
+                                if BS.null bs
+                                        then loop
+                                        else return bs
+                        in loop
+               }
+
 debugBridge :: String -> Bridge f i -> IO (Bridge f i)
 debugBridge name bridge = do
 	sendCounter <- newMVar 0
@@ -85,21 +119,9 @@ debugBridge name bridge = do
 		}
 
 
+-- | cap a bridge with a simple echo. The ByteString function
+-- is called on every packet or virtual packet.
 
--- | for simulations and testing, provide two bridges, and connect them underneath.
-connection :: IO (Bridge framing Trustworthy,Bridge framing Trustworthy)
-connection = do
-        v1 <- newEmptyMVar
-        v2 <- newEmptyMVar
-        return ( Bridge { toBridge = putMVar v2
-                        , fromBridge = takeMVar v1
-                        }
-               , Bridge { toBridge = putMVar v1
-                        , fromBridge = takeMVar v2
-                        }
-               )
-
--- | cap a bridge with a simple echo.
 echo :: (ByteString -> ByteString) -> Bridge framing integrity -> IO ()
 echo f bridge = do
         v <- newEmptyMVar
@@ -109,8 +131,8 @@ echo f bridge = do
         return ()
 
 
--- | Downgrade a framed bridge to a streamed bridge.
-serialize :: Bridge Framed Trustworthy -> Bridge Streamed Trustworthy
+-- | Downgrade a (framed) bridge to a streamed bridge.
+serialize :: Bridge framing Trustworthy -> Bridge Streamed Trustworthy
 serialize (Bridge to from) = Bridge to from
 
 -- | Downgrade an unchecked bridge
