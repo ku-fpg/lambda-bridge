@@ -17,7 +17,7 @@ module Network.LambdaBridge.Bridge
         , checked
         , dropping
         , noise
-        , buffer
+        , baud
         ) where
 
 import Network.LambdaBridge.Logging
@@ -31,6 +31,8 @@ import Control.Monad
 import Data.Word
 import Data.String
 import System.Random
+import Data.Time.Clock
+
 
 debug = debugM "lambda-bridge.bridge"
 
@@ -203,7 +205,41 @@ noise n bridge = do
                         }
 
 
--- Wait this number of (sub)-seconds for rx values.
-buffer :: Float -> Bridge Streamed integrity -> IO (Bridge Streamed integrity)
-buffer n bridge = return bridge        -- TODO
+-- Wait this number of (sub)-seconds for rx values,
+-- fixing the speed at (approximately) the given baud rate.
+baud :: Int -> Bridge Streamed integrity -> IO (Bridge Streamed integrity)
+baud baud_rate bridge = do
+        let rate :: Float
+            rate = 10 / fromIntegral baud_rate
+
+        tm <- getCurrentTime
+        tm_var <- newMVar tm
+
+        v <- newEmptyMVar
+
+        -- flatten/stream the RX.
+        forkIO $ let loop [] = do
+                        bs <- fromBridge bridge
+                        loop (BS.unpack bs)
+                     loop (c:cs) = do
+                        putMVar v c
+                        loop cs
+                 in loop []
+
+        return $ Bridge
+               { toBridge = toBridge bridge
+               , fromBridge = do
+                       tm0 <- takeMVar tm_var
+                       c <- takeMVar v
+                       tm1 <- getCurrentTime
+                       let diff :: Float = realToFrac $ tm1 `diffUTCTime` tm0
+                       tm2 <- if (diff < rate)
+                              then do threadDelay (floor (rate * 1000 * 1000))
+                                      getCurrentTime
+                              else do return tm1
+                       let diff2 :: Float = realToFrac $ tm2 `diffUTCTime` tm0
+                       let discount = min (realToFrac $ diff2 - rate) (realToFrac rate * 10)
+                       putMVar tm_var (addUTCTime (-discount) tm2)
+                       return (BS.pack [c])
+                }
 
