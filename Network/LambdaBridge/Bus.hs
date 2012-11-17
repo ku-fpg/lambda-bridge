@@ -2,6 +2,7 @@
 module Network.LambdaBridge.Bus where
 
 import Network.LambdaBridge.Bridge
+import Network.LambdaBridge.Logging
 
 
 import Control.Concurrent
@@ -19,6 +20,8 @@ import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 
 import Control.Monad.Operational
+
+debug = debugM "lambda-bridge.bus"
 
 -------------------------------------------------------------------
 
@@ -66,7 +69,6 @@ instance Show (BusCmd a) where
         show (BusWrite a d) = "BusWrite " ++ show a ++ " " ++ show d
         show (BusRead a)    = "BusRead " ++ show a
 
-
 type BusM a = Program BusCmd a
 
 done :: BusM (Remote ())
@@ -74,6 +76,24 @@ done = return (pure ())
 
 busWrite addr val = singleton $ BusWrite addr val
 busRead addr      = singleton $ BusRead addr
+
+instance Show (Program BusCmd a) where
+  show = eval . view
+    where eval :: ProgramView BusCmd a -> String
+          eval (Return _)  = ""
+          eval (op@(BusWrite {}) :>>= i) = show op ++ ";" ++ show (i ())
+          eval (op@(BusRead {}) :>>= i) = show op ++ ";" ++ show (i Symbol)
+
+
+{-n
+interp :: forall a c m . (Monad m) => (forall a . c a -> m a) -> Program c a -> m a
+interp f = eval . view
+  where eval :: forall a . ProgramView c a -> m a
+        eval (Return a) = return a
+        eval (m :>>= i) = do
+                r <- f m
+                interp f (i r)
+-}
 
 cmdToRequest :: BusM a -> Writer [Word8] a
 cmdToRequest = interp $ \ cmd -> case cmd of
@@ -166,10 +186,12 @@ connectToBoard timeoutTime bridge = do
 
         return $ Board
           { send = \ cmd -> do
-                let (_,req_msg) = runWriter (cmdToRequest cmd)
-                print req_msg
-
                 uq <- takeMVar uniq
+
+                debug $ show uq ++ ": send {" ++ show cmd ++ "}"
+
+                let (_,req_msg) = runWriter (cmdToRequest cmd)
+                debug $ show uq ++ ": bytes to board " ++ show req_msg
 
                 rep :: MVar (Maybe [Word8]) <- newEmptyMVar
 
@@ -178,17 +200,24 @@ connectToBoard timeoutTime bridge = do
                 -- set up a delayed timeout response
                 forkIO $ do
                         threadDelay (round (timeoutTime * 1000 * 1000))
+                        debug $ show uq ++ " giving up on packet"
                         callback callbacks uq Nothing
 
                 toBridge bridge $ showBusFrame $ BusFrame uq req_msg
 
+                debug $ show uq ++ ": sent"
+
                 -- And wait for the callback
                 rep_msg <- takeMVar rep
+
+                debug $ show uq ++ ": recv'd " ++ show rep_msg
 
                 case rep_msg of
                   Nothing -> return Nothing
                   Just rep_bs -> case runStateT (cmdWithReply cmd) rep_bs of
-                                    Just (Remote a,[]) -> return (Just a)
+                                    Just (Remote a,[]) -> do
+                                         debug $ show uq ++ ": returning success"
+                                         return (Just a)
                                     Just (a,_)  -> return Nothing -- fail "bad format, bad remote, etc"
                                     Nothing     -> return Nothing
           }
