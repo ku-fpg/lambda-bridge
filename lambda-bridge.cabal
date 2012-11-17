@@ -42,6 +42,7 @@ Library
                        Network.LambdaBridge.Handle
                        Network.LambdaBridge.Serial
                        Network.LambdaBridge.Socket
+                       Network.LambdaBridge.Server
                        Network.LambdaBridge.SLIP
                        Network.LambdaBridge.Timeout
 

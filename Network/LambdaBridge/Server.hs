@@ -3,7 +3,7 @@
 -- This can be used for building simulators of hardware board,
 -- debugging, or pass-through components.
 
-module Network.LambdaBridge.Server where
+module Network.LambdaBridge.Server (serverBridge) where
 
 
 import Network.LambdaBridge.Bridge
@@ -33,8 +33,9 @@ debug = debugM "lambda-bridge.server"
 -- In typical useage, Lambda Bridge does not use (software) servers
 -- except for testing, or perhaps forwarding to real hardware.
 --
-serverBytesBridge :: PortID -> Bridge framing integrity -> IO ()
-serverBytesBridge portId bridge =
+serverBridge :: PortID -> IO (Bridge framing integrity)
+serverBridge portId = error ""
+{-
         finally (do sock <- listenOn portId
                     forever $ do
                        debug $ "accepting socket " ++ show sock
@@ -55,4 +56,4 @@ serverBytesBridge portId bridge =
         forever $ do
                 bs <- fromBridge bridge
                 BS.hPut hd bs
-
+-}
