@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 
-module Network.LambdaBridge.Socket (socketBytesBridge) where
+module Network.LambdaBridge.Socket (socketBridge, udpFrameBridge) where
 
 import Network
 import Network.LambdaBridge.Bridge
@@ -32,8 +32,8 @@ type SocketName = String
 -- open a bridge of *bytes* to the given socket name. This depends on the
 -- remote service being configured for bytes. (for example, SOCK_STREAM)
 
-socketBytesBridge :: HostName -> PortID -> IO (Bridge Streamed Trustworthy)
-socketBytesBridge hostName sockName = do
+socketBridge :: HostName -> PortID -> IO (Bridge Streamed Trustworthy)
+socketBridge hostName sockName = do
         hd <- connectTo hostName sockName
         hSetBuffering hd NoBuffering            -- for now
         return $ Bridge { toBridge = \ bs -> do
