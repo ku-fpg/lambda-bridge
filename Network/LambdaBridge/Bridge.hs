@@ -4,13 +4,13 @@ module Network.LambdaBridge.Bridge
         ( Bridge(..)
         , Fragmentation(..)
         , Integrity(..)
-        , Delivery(..)
         , debugBridge
         , connection
         , echo
         , serialize
         , unchecked
         , checked
+        , dropping
         , noise
         , buffer
         ) where
@@ -32,12 +32,9 @@ debug = debugM "lambda-bridge.bridge"
 data Fragmentation     = Framed                 -- ^ sequence of bytes that stay together
                        | Streamed               -- ^ can arived in fragements, or joined
 
-data Integrity         = Trustworthy
-                       | Checked                -- ^ CRC'd
-                       | Unchecked              -- ^ raw bytes
-
-data Delivery          = Reliable               -- ^ will alway get there
-                       | Unreliable             -- ^ may not get there
+data Integrity         = Trustworthy            -- ^ it will get there, can be trusted
+                       | Checked                -- ^ if it gets there, it is good (CRC)
+                       | Unchecked              -- ^ best effort, may be scrambled, lost, etc.
 
 -- | A 'Bridge' is a bidirectional connection to a specific remote API.
 -- There are many different types of Bridges in the lambda-bridge API.
@@ -49,30 +46,12 @@ data Bridge (fragmentation :: Fragmentation)
 	, fromBridge	:: IO BS.ByteString        -- ^ read from a bridge; may block, called many times.
         }
 
-
-{-
-Trustworthy     -- it will get there, can be trusted
-Checked         -- if it gets there, it is good
-Unchecked       -- best effort, may be scrambled, lost, etc.
--}
-
 {-------------------------------------------------------------------
-                Framed                                  Fragmented
+                Streamed                Framed
 
-                Checked         UnChecked               Checked         UnChecked
-
-Reliable        TCP             (*3)                    Socket(TCP)     (*1)
-
-UnReliable      UDP             SLIP                    (*2)            RS232
-
-Can you be Fragmented, Checked, but UnReliable?
-Can you be Fragmented, UnChecked, but Reliable?
-When Fragmented, the concepts of Reliable and Checked collapse into one??
-
-(*1) = every char gets through, some are scrambled.
-(*2) = every char that gets through was sent in that order.
-(*3) = every packet get as there, may be scrambled
-
+Unchecked       RS232                   SLIPed
+Checked         (parity)                UDP
+Trustworthy     TCP (sockets)           TCP (packets)
 
 -------------------------------------------------------------------------
 
@@ -142,6 +121,21 @@ unchecked  (Bridge to from) = Bridge to from
 checked :: Bridge framing Trustworthy  -> Bridge framing Checked
 checked  (Bridge to from) = Bridge to from
 
+-- | drop packets/chars. By convention, only the fromBridge side
+-- has drops (concept: reception is when we detect errors).
+-- 'connection' can be used to introduce bidirectional drops.
+
+dropping :: Float -> Bridge framing Trustworthy -> IO (Bridge framing Unchecked)
+dropping n bridge =
+        return $ Bridge { toBridge = toBridge bridge
+                        , fromBridge = do
+                                let loop = do
+                                        bs <- fromBridge bridge
+                                        q :: Float <- randomIO
+                                        if q < n then loop
+                                                 else return bs
+                                loop
+                        }
 
 -- | introduce noise. By convention, only the fromBridge side
 -- has noise introduced (concept: reception is when we detect errors).
@@ -187,71 +181,3 @@ noise n bridge = do
 buffer :: Float -> Bridge Streamed integrity -> IO (Bridge Streamed integrity)
 buffer n bridge = return bridge        -- TODO
 
-{-
-
--- To be added later
-
--- |  ''Realistic'' is the configuration for ''realisticBridge''.
-data Realistic a = Realistic
-	{ loseU 	:: Float	-- ^ lose an 'a'
-	, dupU 		:: Float	-- ^ dup an 'a'
-	, execptionU 	:: Float	-- ^ throw exception instead
-	, pauseU	:: Float	-- ^ what is the pause between things
-	, mangleU 	:: Float	-- ^ mangle an 'a'
-	, mangler       :: Float -> a -> a -- ^ how to mangle, based on a number between 0 and 1
-	}
-
--- | default instance of 'realistic', which is completely reliable.
-instance Default (Realistic a) where
-	def = Realistic 0 0 0 0 0 (\ g a -> a)
-
-
-{-
-connectBridges :: (Show msg) => Bridge msg -> Realistic msg -> Realistic msg -> Bridge msg -> IO ()
-connectBridges lhs lhsOut rhsOut rhs = do
-	let you :: Float -> IO Bool
-	    you f = do
-		r <- randomIO
-		return $ f > r
-
-	let optMangle f mangle a = do
-		b <- you f
-		if b then do
-		        r <- randomIO
-			return $ mangle r a
-		     else return a
-
-
-        let unrely :: MVar UTCTime -> Realistic msg -> msg -> (msg -> IO ()) -> IO ()
-            unrely tmVar opts a k = do
-		tm0 <- takeMVar tmVar	-- old char time
-		tm1 <- getCurrentTime	-- current time
-		let pause = pauseU opts - realToFrac (tm1 `diffUTCTime` tm0)
-		if pause <= 0 then return () else do
-		   threadDelay (floor (pause * 1000 * 1000))
-		   return ()
-		b <- you (loseU opts)
-		if b then return () else do -- ignore if you "lose" the message.
-		  a <- optMangle (mangleU opts) (mangler opts) a
-		  b <- you (dupU opts)
-		  if b then do		   -- send twice, please
-		  	k a
-		  	k a
-		       else do
-	                k a
-		tm <- getCurrentTime
-		putMVar tmVar tm
-		return ()
-
-	tm <- getCurrentTime
-	tmVar1 <- newMVar tm
-	tmVar2 <- newMVar tm
-
-        forkIO $ forever $ do
-                msg <- fromBridge lhs
-                unrely tmVar1 lhsOut msg $ toBridge rhs
-        forever $ do
-                msg <- fromBridge rhs
-                unrely tmVar2 rhsOut msg $ toBridge lhs
--}
--}
