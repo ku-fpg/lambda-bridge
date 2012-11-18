@@ -212,6 +212,9 @@ connectToBoard timeoutTime bridge = do
 
                 debug $ show uq ++ ": recv'd " ++ show rep_msg
 
+
+--                case rep_msg of { Nothing -> putStrLn "*" ; _ -> return () }
+
                 case rep_msg of
                   Nothing -> return Nothing
                   Just rep_bs -> case runStateT (cmdWithReply cmd) rep_bs of
@@ -356,6 +359,7 @@ busReadPort brd addr = do
                         w <- busRead (addr + 1)
                         t' <- busRead addr
                         return ((,) <$> w <*> t')
+--                print (o,t)
                 case o of
                   Just (w,t') | t /= t' -> do
 --                        print (w,t')
