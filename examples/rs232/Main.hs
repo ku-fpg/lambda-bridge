@@ -97,7 +97,7 @@ main2 "9600"   = test_baud 9600
 
 main = do
         setStdGen (mkStdGen 1000)
-        init_logging
+--        init_logging
         hSetBuffering stdout LineBuffering
         hSetBuffering stdout LineBuffering
 
@@ -113,8 +113,8 @@ main = do
 
         -- introduce errors
 
-        lhs2 <- noise 0.01 (serialize lhs1)
-                                        ; rhs2 <- noise 0.01 (serialize rhs1)
+        lhs2 <- noise 0.0001 (serialize lhs1)
+                                        ; rhs2 <- noise 0.0001 (serialize rhs1)
 
 
         -- level 1                              simulator stack
