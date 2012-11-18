@@ -12,6 +12,9 @@ import Network.LambdaBridge.Bridge
 import Data.Word
 import Data.Bits
 
+debug = debugM "lambda-bridge.crc"
+
+
 {- | Provide Packet Checking by appending a 16-bit CRCs.
      We do not support zero length packets.
 
@@ -45,8 +48,12 @@ crc16Protocol bridge = do
         let loop = do
                 bs <- fromBridge bridge
                 case unframeCRC bs of
-                  Nothing -> loop
-                  Just bs' -> return bs'
+                  Nothing -> do
+                        debug $ "CRC frame failed"
+                        loop
+                  Just bs' -> do
+                        debug $ "CRC frame success"
+                        return bs'
 
         return $ Bridge
               { toBridge = toBridge bridge . frameCRC
