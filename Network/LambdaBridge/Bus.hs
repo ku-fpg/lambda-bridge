@@ -25,12 +25,12 @@ debug = debugM "lambda-bridge.bus"
 
 -------------------------------------------------------------------
 
--- | 'Board' is a handle into a board
-newtype Board = Board
-  { send :: forall a . BusM (Remote a) -> IO (Maybe a)      -- ^ run a transaction on the 'Board', please.
+-- | 'Bus' is a handle into a board
+newtype Bus = Bus
+  { send :: forall a . BusM (Remote a) -> IO (Maybe a)      -- ^ run a transaction on the 'Bus', please.
   }
 
-send_ :: Board -> BusM a -> IO (Maybe ())
+send_ :: Bus -> BusM a -> IO (Maybe ())
 send_ brd m = send brd (m >> return (pure ()))
 
 data Remote a
@@ -165,10 +165,10 @@ unseq16 [h,l] = fromIntegral h * 256 + fromIntegral l
 
 ----------------------------------------------------------------
 
--- | connectBoard takes an initial timeout time,
+-- | connectBus takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
-connectToBoard :: Float -> Bridge Framed Checked -> IO Board
-connectToBoard timeoutTime bridge = do
+connectToBus :: Float -> Bridge Framed Checked -> IO Bus
+connectToBus timeoutTime bridge = do
 
         uniq :: MVar Word16 <- newEmptyMVar
         forkIO $ let loop n = do
@@ -184,7 +184,7 @@ connectToBoard timeoutTime bridge = do
                   Just (BusFrame uq rest) -> callback callbacks uq (Just rest)
                   Nothing                 -> return () -- faulty packet?
 
-        return $ Board
+        return $ Bus
           { send = \ cmd -> do
                 uq <- takeMVar uniq
 
@@ -263,58 +263,8 @@ showBusFrame :: BusFrame -> BS.ByteString
 showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 
 
--- This is used for testing the serialization of the Board commands.
+-- This is used for testing the serialization of the Bus commands.
 --
--- TODO: consider calling this use of Board/Bus VirtualBus, or simulator.
-interpBus :: Bridge Framed Checked -> Board -> IO ()
-interpBus bridge (Board cmd) = do
-
-        forkIO $ forever $ do
-                frame <- fromBridge bridge
-                case readBusFrame frame of
-                  Nothing -> return ()
-                  Just (BusFrame uq ws) -> do
-                        ret <- cmd $ reifyBusCmd ws
-                        case ret of
-                          Nothing -> return ()
-                          Just ws' -> toBridge bridge (showBusFrame $ BusFrame uq ws')
-                        return ()
-        return ()
-
--- | Board is a Monoid (who would have thought)
-instance Monoid Board where
-    mempty = Board (\ cmd -> return Nothing)
-    mappend (Board f1) (Board f2) = Board (fmap runRemote . interp cmdFn)
-        where
-            cmdFn :: BusCmd a -> IO a
-            cmdFn (BusWrite addr val) = do
-                    f1 (busWrite addr val >> return (pure ()))
-                    f2 (busWrite addr val >> return (pure ()))
-                    return ()
-            cmdFn (BusRead addr) = do
-                    r1 <- f1 (busRead addr)
-                    r2 <- f2 (busRead addr)
-                    return (optRemote (r1 <|> r2))
-
-{-
-
-        BusM (Remote a) -> IO (Maybe a)
-
-                f3 cmd = do r <- f1 cmd
-                            case r of
-                              Just a -> return (Just a)
-                              Nothing ->
-
-        let cmdFn :: BusCmd a -> IO a
-            cmdFn (BusWrite 0 val) = wt_tag rpc val
-            cmdFn (BusWrite 1 val) = push rpc val
-            cmdFn (BusWrite _ val) = return ()
-            cmdFn (BusRead 0)      = fmap pure (rd_tag rpc)
-            cmdFn (BusRead 1)      = fmap pure (rd_tag rpc)
-            cmdFn (BusRead _)      = return Symbol
-
--}
-
 -----------------------------------------------------------------------------
 
 data WritePort = WritePort (MVar ByteString)
@@ -322,7 +272,7 @@ data WritePort = WritePort (MVar ByteString)
 writePort :: WritePort -> ByteString -> IO ()
 writePort (WritePort v) = putMVar v
 
-busWritePort :: Board -> Word16 -> IO WritePort
+busWritePort :: Bus -> Word16 -> IO WritePort
 busWritePort brd addr = do
         var <- newEmptyMVar
 
@@ -349,7 +299,7 @@ data ReadPort = ReadPort (MVar ByteString)
 readPort :: ReadPort -> IO ByteString
 readPort (ReadPort v) = takeMVar v
 
-busReadPort :: Board -> Word16 -> IO ReadPort
+busReadPort :: Bus -> Word16 -> IO ReadPort
 busReadPort brd addr = do
         var <- newEmptyMVar
 

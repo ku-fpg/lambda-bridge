@@ -126,7 +126,7 @@ main = do
 
         -- level 3
 
-        lhs_brd <- connectToBoard 0.1 lhs4
+        lhs_brd <- connectToBus 0.1 lhs4
                                         ; interpBus rhs4 sim_brd
 
         -- with the bridge set up, we can do testing

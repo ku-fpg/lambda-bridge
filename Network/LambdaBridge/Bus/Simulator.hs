@@ -29,17 +29,45 @@ import Debug.Trace
 
 debug = debugM "lambda-bridge.sim"
 
+newtype Board = Board (forall a . BusM (Remote a) -> IO (Maybe a))
+
+-- | Board is a Monoid (who would have thought)
+instance Monoid Board where
+    mempty = Board (\ cmd -> return Nothing)
+    mappend (Board f1) (Board f2) = Board (fmap runRemote . interp cmdFn)
+        where
+            cmdFn :: BusCmd a -> IO a
+            cmdFn (BusWrite addr val) = do
+                    f1 (busWrite addr val >> return (pure ()))
+                    f2 (busWrite addr val >> return (pure ()))
+                    return ()
+            cmdFn (BusRead addr) = do
+                    r1 <- f1 (busRead addr)
+                    r2 <- f2 (busRead addr)
+                    return (optRemote (r1 <|> r2))
+
 -- Move the addresses of a command by a specific
 offset :: Word16 -> BusM a -> BusM a
 offset n = interp $ \ cmd -> case cmd of
         BusWrite addr val -> busWrite (addr + n) val
         BusRead addr      -> busRead (addr + n)
 
-{-
-myBus v1 = virtualBus
-        [ (0,   rxMVarToRpc v1 >>= rpcPort)
-        ]
--}
+-- TODO: consider calling this use of Bus/Bus VirtualBus, or simulator.
+interpBus :: Bridge Framed Checked -> Board -> IO ()
+interpBus bridge (Board cmd) = do
+
+        forkIO $ forever $ do
+                frame <- fromBridge bridge
+                case readBusFrame frame of
+                  Nothing -> return ()
+                  Just (BusFrame uq ws) -> do
+                        ret <- cmd $ reifyBusCmd ws
+                        case ret of
+                          Nothing -> return ()
+                          Just ws' -> toBridge bridge (showBusFrame $ BusFrame uq ws')
+                        return ()
+        return ()
+
 
 busAt :: Word16 -> Board -> Board
 busAt n (Board f) = Board (f . offset (-n))
