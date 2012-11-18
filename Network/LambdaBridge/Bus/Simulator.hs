@@ -2,7 +2,8 @@
 module Network.LambdaBridge.Bus.Simulator where
 
 import Network.LambdaBridge.Bridge
-import Network.LambdaBridge.Bus
+import Network.LambdaBridge.Bus hiding (debug)
+import Network.LambdaBridge.Logging
 
 import Control.Concurrent
 import Control.Concurrent.MVar
@@ -26,6 +27,8 @@ import Control.Monad.Operational
 
 import Debug.Trace
 
+debug = debugM "lambda-bridge.sim"
+
 -- Move the addresses of a command by a specific
 offset :: Word16 -> BusM a -> BusM a
 offset n = interp $ \ cmd -> case cmd of
@@ -44,15 +47,20 @@ busAt n (Board f) = Board (f . offset (-n))
 virtualBus :: [(Word16, Board)] -> Board
 virtualBus xs = mconcat [ busAt n bus | (n,bus) <- xs ]
 
-stateMachineToBus :: st -> (forall a . BusCmd a -> st -> IO (a, st)) -> IO Board
+stateMachineToBus :: (Show st) => st -> (forall a . BusCmd a -> st -> IO (a, st)) -> IO Board
 stateMachineToBus st stateMachine = do
         state <- newMVar st
+        tag <- taggart
 
         let cmdFn :: BusCmd a -> IO a
             cmdFn cmd = do
+                    debug $ tag ++ "got instructions {" ++ show cmd ++ "}"
                     st <- takeMVar state
+                    debug $ tag ++ "st = " ++ show st
                     (r,st') <- stateMachine cmd st
+                    debug $ tag ++ "done instructions, st' = " ++ show st'
                     putMVar state st'
+                    debug $ tag ++ "returned value"
                     return r
 
         return $ Board (fmap runRemote . interp cmdFn)
@@ -62,6 +70,7 @@ invalid :: Remote a
 invalid = Symbol
 
 data Go = Go | NoGo
+        deriving Show
 
 type RxState = (Go,Word8)
 --data RxState = RxReady Word8
@@ -84,23 +93,25 @@ rxStateMachine _ (BusWrite _ _) st = return ((),st)
 rxStateMachine _ (BusRead 0) (_,x) = return (pure x, (NoGo,x))
 rxStateMachine _ (BusRead _) st    = return (invalid,st)
 
-type TxState = (Go,Word8)
+type TxState = (Word8,Word8) -- vaild transaction * tag * value
 
 txInitialState :: TxState
-txInitialState = (NoGo,0)
+txInitialState = (-1,35)
 
 txStateMachine :: MVar Word8 -> BusCmd a -> TxState -> IO (a, TxState)
-
-txStateMachine _ (BusWrite 0 w) st@(_,x) | w == x    = return ((),(Go,w))
-                                         | otherwise = return ((),st)
+txStateMachine v (BusWrite 0 w) (t,s)
+     | t + 1 == w = do -- try read *next* byte in pipe
+            r <- tryTakeMVar v
+            case r of
+              Nothing -> return ((),(t,s))
+              Just v  -> return ((),(t + 1,v))
+txStateMachine v (BusWrite 0 w) (t,s)         -- redundent but explicit
+     | t == w = return ((),(t,s))
 txStateMachine _ (BusWrite _ _) st = return ((),st)
 
-txStateMachine _ (BusRead 0) (_,x) = return (pure x, (NoGo,x))
-txStateMachine v (BusRead 1) (Go,x) = do
-                    r <- tryTakeMVar v
-                    case r of
-                      Nothing -> return (pure 0, (NoGo,x))
-                      Just w  -> return (pure w, (NoGo, x + 1))
+-- request that the next tag be used; it will trigger the pull from the mvar
+txStateMachine _ (BusRead 0) (t,s)   = return (pure (t + 1), (t,s))
+txStateMachine v (BusRead 1) (t,s)   = return (pure s, (t,s))
 txStateMachine _ (BusRead _) st    = return (invalid,st)
 
 type MemState = ()
