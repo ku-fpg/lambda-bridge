@@ -3,6 +3,7 @@
 module Network.LambdaBridge.Logging
         ( init_logging
         , debugM
+        , taggart
         ) where
 
 import Control.Exception as E
@@ -15,6 +16,7 @@ import System.Log.Handler.Simple
 import System.Log.Handler (setFormatter,close)
 import System.Log.Formatter
 import System.Posix.Process (getProcessID)
+import System.Random
 
 -- use this instead of the debugM.
 debugM :: String -> String -> IO ()
@@ -38,3 +40,11 @@ init_logging = do
 --        installHandler keyboardSignal (CatchOnce $ print "keyboardSignal") Nothing
 --        installHandler sigSTOP (CatchOnce $ print "sigSTOP") Nothing
 --        installHandler sigINT (CatchOnce $ print "sigINT") Nothing
+
+
+-- These could clash, but it is unlikely
+taggart :: IO String
+taggart = do
+        pid <- randomRIO (0,1000000)
+        return $ "<" ++ show (pid :: Int) ++ ">"
+
