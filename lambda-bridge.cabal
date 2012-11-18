@@ -40,7 +40,6 @@ Library
                        Network.LambdaBridge.Bus
                        Network.LambdaBridge.Board
                        Network.LambdaBridge.CRC
-                       Network.LambdaBridge.Handle
                        Network.LambdaBridge.Serial
                        Network.LambdaBridge.Socket
                        Network.LambdaBridge.Server

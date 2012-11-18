@@ -8,6 +8,7 @@ module Network.LambdaBridge.Bridge
         -- * Bridge Roots
         , connection
         , mVarBridge
+        , handleBridge
         -- * Bridge Caps
         , echo
         -- * Bridge Lifters
@@ -32,6 +33,7 @@ import Data.Word
 import Data.String
 import System.Random
 import Data.Time.Clock
+import System.IO
 
 
 debug = debugM "lambda-bridge.bridge"
@@ -97,6 +99,21 @@ mVarBridge in_var out_var = do
                                         then loop
                                         else return bs
                         in loop
+               }
+
+-- | This turns a input Handle and output Handle into a Bridge.
+
+handleBridge :: Handle -> Handle -> IO (Bridge Streamed Trustworthy)
+handleBridge in_hd out_hd = do
+        hSetBuffering out_hd NoBuffering            -- for now
+        hSetBuffering in_hd NoBuffering            -- for now
+
+        return $ Bridge
+               { toBridge = BS.hPut out_hd
+               , fromBridge = do
+                       bs <- BS.hGet in_hd 1
+                       if BS.length bs == 0 then fail "socket closed"
+                                            else return bs
                }
 
 debugBridge :: String -> Bridge f i -> IO (Bridge f i)
@@ -205,8 +222,7 @@ noise n bridge = do
                         }
 
 
--- Wait this number of (sub)-seconds for rx values,
--- fixing the speed at (approximately) the given baud rate.
+-- | Slow down the rx values, fixing the speed at (approximately) the given baud rate.
 baud :: Int -> Bridge Streamed integrity -> IO (Bridge Streamed integrity)
 baud baud_rate bridge = do
         let rate :: Float

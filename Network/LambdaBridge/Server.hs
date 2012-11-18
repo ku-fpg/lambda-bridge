@@ -10,7 +10,6 @@ module Network.LambdaBridge.Server (serverBridge) where
 
 import Network.LambdaBridge.Bridge
 import Network.LambdaBridge.Logging
-import Network.LambdaBridge.Handle
 
 import Network
 
