@@ -266,6 +266,8 @@ showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 -- This is used for testing the serialization of the Bus commands.
 --
 -----------------------------------------------------------------------------
+-- TODO: add backoff for unsuccesful transfers
+
 
 data WritePort = WritePort (MVar ByteString)
 
