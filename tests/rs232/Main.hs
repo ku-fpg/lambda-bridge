@@ -6,7 +6,7 @@ import Network.LambdaBridge.SLIP
 import Network.LambdaBridge.CRC
 import Network.LambdaBridge.Bus hiding (debug)
 import Network.LambdaBridge.Logging
-import Network.LambdaBridge.Bus.Simulator hiding (debug)
+import Network.LambdaBridge.Board hiding (debug)
 
 import qualified Data.ByteString as BS
 import Control.Concurrent

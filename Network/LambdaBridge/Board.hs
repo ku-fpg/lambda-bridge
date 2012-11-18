@@ -1,5 +1,5 @@
 {-# LANGUAGE KindSignatures, GADTs, FlexibleInstances, RankNTypes, ScopedTypeVariables, DataKinds #-}
-module Network.LambdaBridge.Bus.Simulator where
+module Network.LambdaBridge.Board where
 
 import Network.LambdaBridge.Bridge
 import Network.LambdaBridge.Bus hiding (debug)
