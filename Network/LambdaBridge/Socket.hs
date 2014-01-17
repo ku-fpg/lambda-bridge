@@ -1,52 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 
-module Network.LambdaBridge.Socket (socketBridge, udpFrameBridge) where
-
-import Network
-import Network.LambdaBridge.Bridge
-
-import System.IO
-import Data.Char
-import System.Directory
-import Control.Exception
-import Control.Monad
-import Data.Char
-import System.IO.Unsafe
-import Data.Binary
-import Data.Binary.Get
+module Network.LambdaBridge.Socket where
 import qualified Data.ByteString as BS
 
-import Network.Socket hiding (send, sendTo, recv, recvFrom)
-import Network.Socket.ByteString
+-- | 'Socket' is a lambda-bridge specific socket; a two-directional pipe that Tx/Rx's packets.
 
-
--- | 'SocketName' is the name of a socket.
---
--- When using to name a remote connection, a colon can be used to denote remoteness: "drumchapel:1234"
---
--- Otherwise, a named *socket* is intended.
---
-
-type SocketName = String
-
--- open a bridge of *bytes* to the given socket name. This depends on the
--- remote service being configured for bytes. (for example, SOCK_STREAM)
-
-socketBridge :: HostName -> PortID -> IO (Bridge Streamed Trustworthy)
-socketBridge hostName sockName = do
-        hd <- connectTo hostName sockName
-        hSetBuffering hd NoBuffering            -- for now
-        return $ Bridge { toBridge = \ bs -> do
-                                BS.hPut hd bs
-                        , fromBridge = do
-                                bs <- BS.hGet hd 1
-                                if BS.length bs == 0 then fail "socket closed"
-                                                     else return $ bs
-                        }
-
--- open a bridge of *Datagrams* to the given socket name. This depends on the
--- remote service being configured for frames (for example, SOCK_DGRAM).
-
-udpFrameBridge :: HostName -> Int -> IO (Bridge Framed Checked)
-udpFrameBridge = error "udpFrameBridge: unsupported (yet)"
+data Socket = Socket
+        { send :: BS.ByteString -> IO ()
+        , recv :: IO BS.ByteString
+        }
 

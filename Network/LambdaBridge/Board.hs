@@ -1,5 +1,7 @@
+-- This needs folded into Bus, which is the same idea.
+
 {-# LANGUAGE KindSignatures, GADTs, FlexibleInstances, RankNTypes, ScopedTypeVariables, DataKinds #-}
-module Network.LambdaBridge.Board where
+module                                    Network.LambdaBridge.Board                                    where
 
 import Network.LambdaBridge.Bridge
 import Network.LambdaBridge.Bus hiding (debug)

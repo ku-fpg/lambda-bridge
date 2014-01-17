@@ -5,7 +5,7 @@ module Network.LambdaBridge.Bus
         , send
         , send_
           -- * connecting to a bridge
-        , bridgeToBus
+        , socketToBus
          -- * Other
         , BusCmd(..)
         , BusM
@@ -26,7 +26,8 @@ module Network.LambdaBridge.Bus
         , readPort
         ) where
 
-import Network.LambdaBridge.Bridge
+import Network.LambdaBridge.Socket (Socket)
+import qualified Network.LambdaBridge.Socket as Socket
 import Network.LambdaBridge.Logging
 
 
@@ -186,8 +187,8 @@ unseq16 [h,l] = fromIntegral h * 256 + fromIntegral l
 
 -- | connectBus takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
-bridgeToBus :: Float -> Bridge Framed Checked -> IO Bus
-bridgeToBus timeoutTime bridge = do
+socketToBus :: Float -> Socket -> IO Bus
+socketToBus timeoutTime bridge = do
 
         uniq :: MVar Word16 <- newEmptyMVar
         forkIO $ let loop n = do
@@ -198,7 +199,7 @@ bridgeToBus timeoutTime bridge = do
         callbacks :: Callback Word16 (Maybe [Word8]) <- liftM Callback $ newMVar Map.empty
 
         forkIO $ forever $ do
-                bs0 <- fromBridge bridge
+                bs0 <- Socket.recv bridge
                 case readBusFrame bs0 of
                   Just (BusFrame uq rest) -> callback callbacks uq (Just rest)
                   Nothing                 -> return () -- faulty packet?
@@ -224,7 +225,7 @@ bridgeToBus timeoutTime bridge = do
 
                 -- perhaps send through a MVar, for sequencing with uq?
                 -- So that the HW can reject out-of-order packets.
-                toBridge bridge $ showBusFrame $ BusFrame uq req_msg
+                Socket.send bridge $ showBusFrame $ BusFrame uq req_msg
 
                 debug $ show uq ++ ": sent"
 

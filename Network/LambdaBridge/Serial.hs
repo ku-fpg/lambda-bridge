@@ -9,7 +9,8 @@ import qualified Data.ByteString.Char8 as B
 import Data.ByteString (ByteString)
 import Data.Maybe
 
-import Network.LambdaBridge.Bridge
+import Network.LambdaBridge.Socket (Socket)
+import qualified Network.LambdaBridge.Socket as Socket
 
 
 -- On linux, we need to give permissions to read/write the TTY,
@@ -27,10 +28,10 @@ lbSerialDefault = SerialPortSettings { commSpeed   = CS115200,
                                     timeout     = 10
 				  }
 
-serialDriver :: FilePath	        -- ^ The filename of the serial port, such as /dev/ttyS0 or /dev/ttyUSB0
+serialSocket :: FilePath	        -- ^ The filename of the serial port, such as /dev/ttyS0 or /dev/ttyUSB0
              -> SerialPortSettings	-- ^ The settings; has default
-             -> IO (Bridge Streamed Unchecked)
-serialDriver filePath settings = do
+             -> IO Socket
+serialSocket filePath settings = do
         port <- openSerial filePath settings
         setDTR port False
         setRTS port False
@@ -49,13 +50,8 @@ serialDriver filePath settings = do
                       then readByteString
                       else return $ BS.pack $ fmap (fromIntegral . ord) $ B.unpack bs
 
-        return $ Bridge
-               { toBridge = writeByteString
-               , fromBridge = readByteString
+        return $ Socket.Socket
+               { Socket.send = writeByteString
+               , Socket.recv = readByteString
                }
 
-
-main = do
-        br <- serialDriver "/dev/master" lbSerialDefault
-        echo (BS.map (\ c -> if c >= 32 then c+1 else c)) br
-        print ()
