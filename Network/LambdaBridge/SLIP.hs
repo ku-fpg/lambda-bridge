@@ -1,11 +1,21 @@
 {-# LANGUAGE DataKinds, TypeFamilies #-}
---
--- | Support for providing a Frame-based API on top of an bytestream, using SLIP.
---
--- * <http://en.wikipedia.org/wiki/Serial_Line_Internet_Protocol>
---
--- * <http://tools.ietf.org/html/rfc1055>
---
+
+
+{- | Support for providing a Frame-based API on top of an bytestream, using SLIP.
+
+   * <http://en.wikipedia.org/wiki/Serial_Line_Internet_Protocol>
+
+   * <http://tools.ietf.org/html/rfc1055>
+
+
+  The format for SLIP is simple: optional end tag, payload with stuffing, end tag.
+
+> <-END-><- PAYLOAD with byte stuffing                  -><-END->
+> +-----+-------------------------------------------------+-----+
+> | 192 |  payload { 192 -> [219,220], 219 -> [219,221] } | 192 |
+> +-----+-------------------------------------------------+-----+
+
+-}
 
 module Network.LambdaBridge.SLIP
 	( slipProtocol
@@ -21,6 +31,7 @@ import Control.Monad
 
 import Network.LambdaBridge.Logging (debugM)
 import Network.LambdaBridge.Bridge
+
 
 type family SLIP_Integrity (a :: Integrity) :: Integrity
 type instance SLIP_Integrity Trustworthy = Trustworthy

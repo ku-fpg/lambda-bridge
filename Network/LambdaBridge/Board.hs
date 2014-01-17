@@ -31,6 +31,12 @@ debug = debugM "lambda-bridge.sim"
 
 newtype Board = Board (forall a . BusM (Remote a) -> IO (Maybe a))
 
+boardToBus :: Float -> Board -> IO Bus
+boardToBus t brd = do
+        (b1,b2) <- connection
+        interpBus (checked b2) brd
+        bridgeToBus t (checked b1)
+
 -- | Board is a Monoid (who would have thought)
 instance Monoid Board where
     mempty = Board (\ cmd -> return Nothing)

@@ -1,5 +1,30 @@
 {-# LANGUAGE KindSignatures, GADTs, FlexibleInstances, RankNTypes, ScopedTypeVariables, DataKinds #-}
-module Network.LambdaBridge.Bus where
+module Network.LambdaBridge.Bus
+        ( -- * Main datatype
+          Bus   -- abstract
+        , send
+        , send_
+          -- * connecting to a bridge
+        , bridgeToBus
+         -- * Other
+        , BusCmd(..)
+        , BusM
+        , Remote(Symbol) -- abstract
+        , reifyBusCmd
+        , readBusFrame
+--        , writeBusFrame
+        , busRead
+        , busWrite
+        , runRemote
+        , interp
+        , optRemote
+        , showBusFrame
+        , BusFrame(..)
+        , busWritePort
+        , busReadPort
+        , writePort
+        , readPort
+        ) where
 
 import Network.LambdaBridge.Bridge
 import Network.LambdaBridge.Logging
@@ -25,11 +50,15 @@ debug = debugM "lambda-bridge.bus"
 
 -------------------------------------------------------------------
 
--- | 'Bus' is a handle into a board
+-- | 'Bus' is a handle into a board, via the Lambda Bridge Bus.
 newtype Bus = Bus
-  { send :: forall a . BusM (Remote a) -> IO (Maybe a)      -- ^ run a transaction on the 'Bus', please.
+  { -- | run a transaction on the 'Bus', please.
+    -- Returns 'Nothing' if transaction had problems.
+    send :: forall a . BusM (Remote a) -> IO (Maybe a)
   }
 
+-- | run a transaction on the 'Bus' please; I'll ignore the result.
+-- Returns 'Nothing' if transaction had problems.
 send_ :: Bus -> BusM a -> IO (Maybe ())
 send_ brd m = send brd (m >> return (pure ()))
 
@@ -84,16 +113,6 @@ instance Show (Program BusCmd a) where
           eval (op@(BusWrite {}) :>>= i) = show op ++ ";" ++ show (i ())
           eval (op@(BusRead {}) :>>= i) = show op ++ ";" ++ show (i Symbol)
 
-
-{-n
-interp :: forall a c m . (Monad m) => (forall a . c a -> m a) -> Program c a -> m a
-interp f = eval . view
-  where eval :: forall a . ProgramView c a -> m a
-        eval (Return a) = return a
-        eval (m :>>= i) = do
-                r <- f m
-                interp f (i r)
--}
 
 cmdToRequest :: BusM a -> Writer [Word8] a
 cmdToRequest = interp $ \ cmd -> case cmd of
@@ -167,8 +186,8 @@ unseq16 [h,l] = fromIntegral h * 256 + fromIntegral l
 
 -- | connectBus takes an initial timeout time,
 --  and a Bridge Frame to the board, and returns
-connectToBus :: Float -> Bridge Framed Checked -> IO Bus
-connectToBus timeoutTime bridge = do
+bridgeToBus :: Float -> Bridge Framed Checked -> IO Bus
+bridgeToBus timeoutTime bridge = do
 
         uniq :: MVar Word16 <- newEmptyMVar
         forkIO $ let loop n = do
@@ -203,6 +222,8 @@ connectToBus timeoutTime bridge = do
                         debug $ show uq ++ " giving up on packet"
                         callback callbacks uq Nothing
 
+                -- perhaps send through a MVar, for sequencing with uq?
+                -- So that the HW can reject out-of-order packets.
                 toBridge bridge $ showBusFrame $ BusFrame uq req_msg
 
                 debug $ show uq ++ ": sent"
@@ -266,8 +287,7 @@ showBusFrame (BusFrame uq msg) = BS.append (BS.pack (seq16 uq)) (BS.pack msg)
 -- This is used for testing the serialization of the Bus commands.
 --
 -----------------------------------------------------------------------------
--- TODO: add backoff for unsuccesful transfers
-
+-- TODO: add backoff for unsuccesful transfers.
 
 data WritePort = WritePort (MVar ByteString)
 
